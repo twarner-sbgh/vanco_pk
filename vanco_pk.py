@@ -1,109 +1,160 @@
+# vanco_pk.py
 import numpy as np
-import datetime
+from dataclasses import dataclass
+from datetime import timedelta
 
-UMOL_L_PER_MG_DL = 88.4
+LN2 = np.log(2)
 
-def cockcroft_gault_si(age, weight_kg, plasma_creatinine_umol_L, sex):
-    plasma_creatinine_umol_L = max(plasma_creatinine_umol_L, 40.0) 
-    serum_creatinine_umol_L = plasma_creatinine_umol_L * 0.9
-    scr_mg_dl = serum_creatinine_umol_L / UMOL_L_PER_MG_DL
-    crcl = ((140 - age) * weight_kg) / (72 * scr_mg_dl)
-    if sex.lower() == "female":
-        crcl *= 0.85
-    return min(crcl, 150.0)
+KE_MAX = LN2 / 5.5        # 5.5 h half-life ceiling
+KE_MIN = LN2 / 120        # safety floor (~120 h)
 
-def calculate_single_dose_conc(t, dose_mg, dose_start_h, infusion_h, cl, v):
-    k = cl / v
-    rate = dose_mg / infusion_h
-    t_dose = t - dose_start_h
-    if t_dose < 0: return 0.0
-    elif t_dose <= infusion_h:
-        return (rate / cl) * (1 - np.exp(-k * t_dose))
-    else:
-        c_end = (rate / cl) * (1 - np.exp(-k * infusion_h))
-        return c_end * np.exp(-k * (t_dose - infusion_h))
+@dataclass
+class Dose:
+    time: float
+    amount: float
+    ke: float = None
 
-def simulate_vanco_timed(
-    age, sex, weight_kg, 
-    base_cr_val, base_cr_dt,
-    new_cr_val, new_cr_dt,
-    dose_history,
-    standing_dose_mg, standing_interval_h,
-    sim_start_dt, sim_end_dt,
-    measured_level=None # {'val': float, 'dt': datetime}
+def pk_params_from_patient(
+    age,
+    sex,
+    weight_kg,
+    height_cm,
+    cr_func,
+    when,
 ):
-    total_hours = (sim_end_dt - sim_start_dt).total_seconds() / 3600
-    time_h = np.arange(0, total_hours, 0.1)
-    
-    # --- Creatinine Trajectory ---
-    base_offset = (base_cr_dt - sim_start_dt).total_seconds() / 3600
-    new_offset = (new_cr_dt - sim_start_dt).total_seconds() / 3600
-    dur = max(0.1, new_offset - base_offset)
-    delta = new_cr_val - base_cr_val
-    
-    creat = np.full_like(time_h, base_cr_val, dtype=float)
-    mask_ramp = (time_h >= base_offset) & (time_h <= new_offset)
-    mask_post = (time_h > new_offset)
-    creat[mask_ramp] += delta * ((time_h[mask_ramp] - base_offset) / dur)
-    creat[mask_post] += delta
+    """
+    Returns ke (1/h) and Vd (L) from patient characteristics
+    """
 
-    # --- PK Calculation ---
-    v = 0.7 * weight_kg
-    
-    # Calculate population CL vector
-    cl_vec_pop = np.array([4.5 * (cockcroft_gault_si(age, weight_kg, c, sex)/100)**0.75 for c in creat])
-    
-    # --- Best Fit Logic ---
-    bias = 1.0
-    if measured_level and measured_level['val'] > 0:
-        # Find time index of the lab
-        lab_offset = (measured_level['dt'] - sim_start_dt).total_seconds() / 3600
-        idx = np.abs(time_h - lab_offset).argmin()
-        
-        # Iterative solver to find the bias (multiplier) for CL that hits the lab level
-        best_bias = 1.0
-        min_error = float('inf')
-        for test_bias in np.linspace(0.3, 3.0, 100):
-            test_cl = cl_vec_pop * test_bias
-            test_conc = 0
-            for d in dose_history:
-                rel = (d['dt'] - sim_start_dt).total_seconds() / 3600
-                test_conc += calculate_single_dose_conc(lab_offset, d['mg'], rel, 1.5, test_cl[idx], v)
-            
-            error = abs(test_conc - measured_level['val'])
-            if error < min_error:
-                min_error = error
-                best_bias = test_bias
-        bias = best_bias
+    # -------------------------
+    # Creatinine at time point
+    # -------------------------
+    cr = cr_func(when)  # µmol/L
 
-    final_cl_vec = cl_vec_pop * bias
-    conc = np.zeros_like(time_h)
+    # -------------------------
+    # Weightless Cockcroft–Gault
+    # -------------------------
+    crcl = (140 - age) * 88.4 / cr
+    if sex.lower().startswith("f"):
+        crcl *= 0.85
 
-    # Sum all doses (History + Standing)
-    all_doses = []
-    for d in dose_history:
-        all_doses.append({'mg': d['mg'], 't': (d['dt'] - sim_start_dt).total_seconds() / 3600})
-    
-    if standing_dose_mg > 0:
-        last_t = max([d['t'] for d in all_doses]) if all_doses else 0
-        curr_t = last_t + standing_interval_h
-        while curr_t < total_hours:
-            all_doses.append({'mg': standing_dose_mg, 't': curr_t})
-            curr_t += standing_interval_h
+    # Serum-to-plasma Cr correction
+    crcl *= 0.9  # REQUIRED 
 
-    for d in all_doses:
-        for i, t in enumerate(time_h):
-            conc[i] += calculate_single_dose_conc(t, d['mg'], d['t'], 1.5, final_cl_vec[i], v)
+    # -------------------------
+    # Matzke elimination
+    # -------------------------
+    ke = 0.00083 * crcl + 0.0044
 
-    # Derived PK constants (Final state)
-    final_cl = final_cl_vec[-1]
-    ke = final_cl / v
-    thalf = 0.693 / ke
-    mask_24 = time_h >= (time_h[-1] - 24)
-    auc_24 = np.trapezoid(conc[mask_24], time_h[mask_24]) if any(mask_24) else 0
-    
-    return {
-        "time_h": time_h, "conc": conc, "creat": creat, 
-        "auc24": auc_24, "cl": final_cl, "v": v, 
-        "ke": ke, "thalf": thalf
-    }
+    KE_MAX = 0.693 / 5.5   # fastest allowed elimination
+    KE_MIN = 0.693 / 120  # very slow elimination safety floor
+
+    ke = min(ke, KE_MAX)
+    ke = max(ke, KE_MIN)
+
+    # -------------------------
+    # Ideal & dosing body weight
+    # -------------------------
+    if sex.lower().startswith("m"):
+        ibw = 50 + 0.9 * (height_cm - 152)
+    else:
+        ibw = 45.5 + 0.9 * (height_cm - 152)
+
+    if weight_kg > 1.25 * ibw:
+        # Dosing body weight with obesity factor 0.4
+        dbw = ibw + 0.4 * (weight_kg - ibw)
+    else:
+        dbw = weight_kg
+
+    # -------------------------
+    # Volume of distribution
+    # -------------------------
+    vd = 0.7 * dbw  # L
+
+    return ke, vd
+
+class VancoPK:
+    def __init__(self, ke, vd):
+        self.ke = ke      # 1/h
+        self.vd = vd      # L
+
+    @property
+    def clearance(self):
+        """Clearance in L/h"""
+        return self.ke * self.vd
+
+    @property
+    def half_life(self):
+        """Half-life in hours"""
+        return 0.693 / self.ke if self.ke > 0 else float("inf")
+
+    def run(self, doses, duration_days=7, dt=0.1):
+        """
+        doses: list of (time_hours, dose_mg)
+        returns dict with time, conc, auc24, ke, half_life, vd
+        """
+
+        t_end = duration_days * 24
+        time = np.arange(0, t_end + dt, dt)
+        conc = np.zeros_like(time)
+
+        for t_dose, dose in doses:
+            mask = time >= t_dose
+            conc[mask] += (dose / self.vd) * np.exp(
+                -self.ke * (time[mask] - t_dose)
+            )
+
+        mask24 = time >= (t_end - 24)
+        auc24 = np.trapezoid(conc[mask24], time[mask24])
+
+        return {
+            "time": time,
+            "conc": conc,
+            "auc24": auc24,
+            "ke": self.ke,
+            "half_life": self.half_life,
+            "vd": self.vd,
+        }
+
+    def simulate_regimen(
+        self,
+        dose_mg,
+        interval_h,
+        start_datetime,
+        end_datetime,
+        dt=0.1,
+    ):
+        """
+        Simulate a standing regimen between two datetimes.
+        """
+
+        total_hours = (end_datetime - start_datetime).total_seconds() / 3600.0
+
+        doses = []
+        t = 0.0
+        while t <= total_hours:
+            doses.append((t, dose_mg))
+            t += interval_h
+
+        duration_days = total_hours / 24.0
+        return self.run(doses, duration_days, dt)
+
+def compute_ci(self, level=0.5):
+    """
+    Compute a confidence interval for ke based on fitted variance.
+    Currently a simple symmetric CI around ke.
+    """
+
+    # Safety check
+    if not hasattr(self, "ke"):
+        raise ValueError("ke not calculated; cannot compute CI")
+
+    # If no variance estimate exists, return a conservative interval
+    if not hasattr(self, "ke_sd") or self.ke_sd is None:
+        delta = 0.2 * self.ke
+        return self.ke - delta, self.ke + delta
+
+    z = 0.674 if level == 0.5 else 1.96
+    lo = max(self.ke - z * self.ke_sd, 0)
+    hi = self.ke + z * self.ke_sd
+    return lo, hi
