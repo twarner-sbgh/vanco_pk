@@ -69,7 +69,7 @@ def pk_params_from_patient(
     # -------------------------
     # Volume of distribution
     # -------------------------
-    vd = 0.7 * dbw  # L
+    vd = 0.75 * dbw  # L
 
     return ke, vd
 
