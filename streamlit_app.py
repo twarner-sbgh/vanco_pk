@@ -90,7 +90,7 @@ cr_func = build_creatinine_function(
 # Simulation start
 # ---------------------------
 sim_start_date = st.date_input(
-    "Simulation start date",
+    "Simulation Start Date",
     datetime.now().date() - timedelta(days=1)
 )
 sim_start = datetime.combine(sim_start_date, datetime.min.time())
@@ -113,7 +113,7 @@ doses = []
 # ---------------------------
 # Manual doses
 # ---------------------------
-st.header("Manual doses")
+st.header("Manual Doses")
 
 manual_doses = []
 manual_times = []
@@ -143,10 +143,10 @@ for i in range(5):
 # ---------------------------
 # Ordered dose
 # ---------------------------
-st.header("Ordered dose")
+st.header("Ordered Regimen")
 
 show_ordered_dose = st.checkbox(
-    "Display ordered dose regimen",
+    "Display ordered regimen",
     value=False,
     key="show_ordered_dose"
 )
@@ -202,7 +202,7 @@ if (
 # ---------------------------
 # Levels
 # ---------------------------
-st.header("Measured levels")
+st.header("Measured Levels")
 
 levels = []
 level_times = []
@@ -226,10 +226,10 @@ for i in range(5):
 # ---------------------------
 # Try regimen
 # ---------------------------
-st.header("Try regimen")
+st.header("Try Regimen/Suggested Regimen")
 
 show_try_regimen = st.checkbox(
-    "Show try regimen on graph",
+    "Show try/suggested regimen on graph",
     value=False,
     key="show_try_regimen"
 )
@@ -391,7 +391,7 @@ ax.grid(alpha=0.2)
 st.pyplot(fig)
 
 # ---------------------------
-# Stats display
+# Entered regimen stats display
 # ---------------------------
 
 ke = results["ke"]
@@ -399,7 +399,7 @@ t_half = results["half_life"]
 vd = results["vd"]
 auc24 = results["auc24"]
 
-st.subheader("PK Summary")
+st.subheader("PK Summary (Entered Regimen)")
 
 col1, col2, col3, col4 = st.columns(4)
 
@@ -414,6 +414,32 @@ elif auc24 > 600:
     st.error("AUC24 above target (400–600)")
 else:
     st.success("AUC24 within target (400–600)")
+
+# ---------------------------
+# Try Regimen stats display
+# ---------------------------
+
+if try_results is not None:
+    ke_try = try_results["ke"]
+    t_half_try = try_results["half_life"]
+    vd_try = try_results["vd"]
+    auc24_try = try_results["auc24"]
+
+    st.subheader("PK Summary (Try / Suggested Regimen)")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric("ke (1/h)", f"{ke_try:.3f}")
+    col2.metric("Half-life (h)", f"{t_half_try:.1f}")
+    col3.metric("Vd (L)", f"{vd_try:.1f}")
+    col4.metric("AUC24", f"{auc24_try:.0f}")
+
+    if auc24_try < 400:
+        st.error("Try regimen AUC24 below target (400–600)")
+    elif auc24_try > 600:
+        st.error("Try regimen AUC24 above target (400–600)")
+    else:
+        st.success("Try regimen AUC24 within target (400–600)")
 
 # ---------------------------
 # Confidence interval

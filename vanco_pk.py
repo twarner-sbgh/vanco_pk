@@ -3,6 +3,8 @@ import numpy as np
 from dataclasses import dataclass
 from datetime import timedelta
 
+INFUSION_RATE = 1000.0  # mg/hour
+
 LN2 = np.log(2)
 
 KE_MAX = LN2 / 5.5        # 5.5 h half-life ceiling
@@ -61,17 +63,20 @@ def pk_params_from_patient(
         ibw = 45.5 + 0.9 * (height_cm - 152)
 
     if weight_kg > 1.25 * ibw:
-        # Dosing body weight with obesity factor 0.4
+        # Obese → dosing body weight
         dbw = ibw + 0.4 * (weight_kg - ibw)
+        weight_for_vd = dbw
     else:
-        dbw = weight_kg
+        # Non-obese → actual body weight
+        weight_for_vd = weight_kg
 
     # -------------------------
     # Volume of distribution
     # -------------------------
-    vd = 0.75 * dbw  # L
+    vd = 0.75 * weight_for_vd  # L
 
     return ke, vd
+
 
 class VancoPK:
     def __init__(self, ke, vd):
@@ -98,12 +103,29 @@ class VancoPK:
         time = np.arange(0, t_end + dt, dt)
         conc = np.zeros_like(time)
 
+        # Track active infusions
+        infusions = []
         for t_dose, dose in doses:
-            mask = time >= t_dose
-            conc[mask] += (dose / self.vd) * np.exp(
-                -self.ke * (time[mask] - t_dose)
-            )
+            duration = dose / INFUSION_RATE  # hours
+            infusions.append((t_dose, t_dose + duration))
 
+        for i in range(1, len(time)):
+            t = time[i]
+            c_prev = conc[i - 1]
+
+            # Elimination
+            dc = -self.ke * c_prev * dt
+
+            # Infusion input
+            rate_in = 0.0
+            for (t_start, t_end_inf), (_, dose) in zip(infusions, doses):
+                if t_start <= t < t_end_inf:
+                    rate_in += INFUSION_RATE / self.vd  # mg/L/h
+
+            dc += rate_in * dt
+            conc[i] = c_prev + dc
+
+        # AUC24 from last 24h
         mask24 = time >= (t_end - 24)
         auc24 = np.trapezoid(conc[mask24], time[mask24])
 
