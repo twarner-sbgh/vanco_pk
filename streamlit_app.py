@@ -173,10 +173,10 @@ if show_ordered_dose:
 
     ordered_start = st.datetime_input(
         "Ordered dose start time",
-        sim_start + timedelta(hours=9, minutes=30),
+        sim_start + timedelta(days=1, hours=9, minutes=30),  # Added days=1
         key="ordered_start"
     )
-
+    
 if (
     show_ordered_dose
     and ordered_start is not None
