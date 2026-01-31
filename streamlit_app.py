@@ -39,7 +39,7 @@ weight = st.slider(
     min_value=30.0,
     max_value=200.0,
     value=75.0,
-    step=0.1,
+    step=0.5,
 )
 
 height = st.slider(
@@ -47,7 +47,7 @@ height = st.slider(
     min_value=140.0,
     max_value=230.0,
     value=175.0,
-    step=0.1,
+    step=0.5,
 )
 
 # ---------------------------
@@ -55,7 +55,7 @@ height = st.slider(
 # ---------------------------
 st.header("Creatinine")
 
-cr1 = st.slider("Creatinine (µmol/L)", 35, 500, 210)
+cr1 = st.slider("Creatinine (µmol/L)", 35, 500, 100)
 cr1_time = st.datetime_input("Creatinine time", datetime.now() - timedelta(days=1))
 
 use_second_cr = st.checkbox("Enter second creatinine to simulate trend (to stable value after ~4 days)")
@@ -176,7 +176,7 @@ if show_ordered_dose:
         sim_start + timedelta(days=1, hours=9, minutes=30),  # Added days=1
         key="ordered_start"
     )
-    
+
 if (
     show_ordered_dose
     and ordered_start is not None
