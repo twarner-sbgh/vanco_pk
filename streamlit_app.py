@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import matplotlib.dates as mdates
-from vanco_pk import VancoPK, pk_params_from_patient
+from vanco_pk import VancoPK, pk_params_from_patient, dose_ci_from_ke
 from vanco_pk import VancoPK
 from creatinine import build_creatinine_function
 from dosing import (
@@ -442,11 +442,48 @@ if try_results is not None:
         st.success("Try regimen AUC24 within target (400–600)")
 
 # ---------------------------
-# Confidence interval
+# Confidence intervals
 # ---------------------------
 
 if len(levels) >= 1:
-    lo, hi = pk.compute_ci(level=0.5)
-    st.info(f"50% CI for ke: {lo:.3f} – {hi:.3f}")
+    # Bayesian best-fit ke
+    pk.fit_ke_from_levels(doses, level_times, levels)
+
+    # ke CI
+    ke_lo, ke_hi = pk.compute_ci(level=0.5)
+    st.info(f"50% CI for ke: {ke_lo:.3f} – {ke_hi:.3f}")
+
+    # Dose CI (only if implemented)
+    dose_lo, dose_hi = dose_ci_from_ke(
+        pk,
+        target_auc=500,
+        interval_h=suggested_interval,
+        level=0.5,
+    )
+
+    if dose_lo is not None:
+        st.info(
+            f"Suggested dose CI (50%): "
+            f"{dose_lo:.0f} – {dose_hi:.0f} mg q{suggested_interval}h"
+        )
+    else:
+        st.warning("Dose confidence interval unavailable.")
+
 else:
-    st.warning("Confidence intervals unreliable without measured levels.")
+    st.warning(
+        "Confidence intervals are unreliable without measured vancomycin levels."
+    )
+
+def ci_strength_label(n_levels):
+    if n_levels == 0:
+        return "Population estimate only"
+    elif n_levels == 1:
+        return "Low confidence (1 level)"
+    elif n_levels == 2:
+        return "Moderate confidence (2 levels)"
+    else:
+        return "Higher confidence (≥3 levels)"
+
+st.caption(ci_strength_label(len(levels)))
+
+
