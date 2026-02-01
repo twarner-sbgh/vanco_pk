@@ -150,31 +150,56 @@ class VancoPK:
         duration_days = total_hours / 24.0
         return self.run(doses, duration_days, dt)
 
-    def predicted_concentration_at(self, t_hours, doses):
-        """Predict concentration at a specific time (hours since sim start)."""
-        c = 0.0
-        for t_dose, dose in doses:
-            if t_hours >= t_dose:
-                c += (dose / self.vd) * np.exp(-self.ke * (t_hours - t_dose))
-        return c
+    def predict_at_times(self, doses, times_h):
+        """
+        Predict concentrations at specific times using the SAME engine as run()
+        """
+        t_end = max(times_h) + 0.1
+        time = np.arange(0, t_end + 0.1, 0.1)
+        conc = np.zeros_like(time)
 
-    def fit_ke_from_levels(self, doses, level_times, levels, sigma=0.15):
-        """Bayesian MAP fit of ke using measured levels."""
+        # build infusions
+        infusions = []
+        for t_dose, dose_mg in doses:
+            dur = dose_mg / INFUSION_RATE
+            infusions.append((t_dose, t_dose + dur))
+
+        for i in range(1, len(time)):
+            c_prev = conc[i - 1]
+            dc = -self.ke * c_prev * 0.1
+
+            rate_in = 0.0
+            for t0, t1 in infusions:
+                if t0 <= time[i] < t1:
+                    rate_in += INFUSION_RATE / self.vd
+
+            conc[i] = c_prev + (dc + rate_in * 0.1)
+
+        return np.interp(times_h, time, conc)
+
+
+    def fit_ke_from_levels(self, doses, level_times, levels, sim_start, sigma_frac=0.15):
+        """
+        Bayesian MAP estimation of ke using measured levels
+        """
+
+        # Convert level times to hours since sim_start
+        times_h = [
+            (t - sim_start).total_seconds() / 3600
+            for t in level_times
+        ]
+
         ke_grid = np.linspace(self.ke_prior * 0.3, self.ke_prior * 3.0, 200)
         log_post = []
 
-        # Convert datetimes to relative hours for prediction
-        level_times_h = [(t - level_times[0]).total_seconds() / 3600 for t in level_times]
+        obs = np.array(levels)
+        sigma = sigma_frac * np.maximum(obs, 1.0)
 
         for k in ke_grid:
             self.ke = k
-            preds = np.array([self.predicted_concentration_at(t, doses) for t in level_times_h])
-            obs = np.array(levels)
+            preds = self.predict_at_times(doses, times_h)
 
-            # Likelihood (proportional error model)
-            ll = -np.sum((obs - preds) ** 2) / (2 * (sigma * obs.mean()) ** 2)
-
-            # Weak prior centered on creatinine-based ke
+            ll = -np.sum((obs - preds) ** 2 / (2 * sigma ** 2))
             prior = -((k - self.ke_prior) ** 2) / (2 * (0.3 * self.ke_prior) ** 2)
 
             log_post.append(ll + prior)
@@ -184,14 +209,12 @@ class VancoPK:
 
         self.ke = ke_grid[idx]
 
-        # Approximate SD from curvature
-        second_deriv = np.gradient(np.gradient(log_post, ke_grid), ke_grid)
-        if second_deriv[idx] < 0:
-            self.ke_sd = np.sqrt(-1 / second_deriv[idx])
-        else:
-            self.ke_sd = 0.2 * self.ke  # Fallback
+        # curvature-based SD
+        d2 = np.gradient(np.gradient(log_post, ke_grid), ke_grid)
+        self.ke_sd = np.sqrt(-1 / d2[idx]) if d2[idx] < 0 else 0.25 * self.ke
 
         return self.ke
+
 
     def compute_ci(self, level=0.5):
         """Compute a confidence interval for ke."""
