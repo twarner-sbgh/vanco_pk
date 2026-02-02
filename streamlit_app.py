@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import matplotlib.dates as mdates
 from vanco_pk import VancoPK, pk_params_from_patient, dose_ci_from_ke
-from vanco_pk import VancoPK
 from creatinine import build_creatinine_function
 from dosing import (
     build_manual_doses,
@@ -17,7 +16,6 @@ from dosing import (
 # ---------------------------
 # Streamlit setup
 # ---------------------------
-
 st.set_page_config(layout="centered")
 st.title("Vancomycin PK Simulator")
 
@@ -27,68 +25,44 @@ st.title("Vancomycin PK Simulator")
 st.header("Patient")
 
 age = st.number_input("Age (years)", 18, 100, 65)
-
-sex = st.radio(
-    "Sex",
-    ["Male", "Female"],
-    horizontal=True
-)
-
-weight = st.slider(
-    "Weight (kg)",
-    min_value=30.0,
-    max_value=200.0,
-    value=75.0,
-    step=0.5,
-)
-
-height = st.slider(
-    "Height (cm)",
-    min_value=140.0,
-    max_value=230.0,
-    value=175.0,
-    step=0.5,
-)
+sex = st.radio("Sex", ["Male", "Female"], horizontal=True)
+weight = st.slider("Weight (kg)", 30.0, 200.0, 75.0, 0.5)
+height = st.slider("Height (cm)", 140.0, 230.0, 175.0, 0.5)
 
 # ---------------------------
 # Creatinine
 # ---------------------------
 st.header("Creatinine")
 
-cr1 = st.slider("Creatinine (µmol/L)", 35, 500, 100)
-cr1_time = st.datetime_input("Creatinine time", datetime.now() - timedelta(days=1))
+cr1 = st.slider("Initial Creatinine (µmol/L)", 35, 500, 100)
+cr1_time = st.datetime_input("Initial Creatinine time", datetime.now() - timedelta(days=1))
 
-use_second_cr = st.checkbox("Enter second creatinine to simulate trend (to stable value after ~4 days)")
-
+# Initialize variables to prevent NameErrors
 cr2 = None
 cr2_time = None
-
-if use_second_cr:
-    cr2 = st.slider("Second creatinine (µmol/L)", 35, 500, 210)
-    cr2_time = st.datetime_input("Second creatinine time", datetime.now())
-
-use_cr_traj = st.checkbox("Use crude predicted creatinine change (multiple of baseline, reached after ~4 days)")
-
 multiplier = 1.0
+use_cr_traj = False
 
-if use_cr_traj and not use_second_cr:
-    multiplier = st.selectbox(
-        "Predicted change",
-        [3, 2, 1.5, 1, 0.75, 0.5, 0.25],
-        index=3,
-        format_func=lambda x: f"{x}x"
-    )
+cr_mode = st.radio(
+    "Creatinine Simulation Type",
+    ["Constant (Single Value)", "Two-Point Linear Trend", "Predicted Multiplier Trajectory"]
+)
+
+if cr_mode == "Two-Point Linear Trend":
+    cr2 = st.slider("Second Creatinine (µmol/L)", 35, 500, 100)
+    cr2_time = st.datetime_input("Second Creatinine time", datetime.now())
+elif cr_mode == "Predicted Multiplier Trajectory":
+    use_cr_traj = True
+    multiplier = st.selectbox("Predicted change", [3, 2, 1.5, 1, 0.75, 0.5, 0.25], index=3)
 
 cr_func = build_creatinine_function(
-    cr1, cr1_time,
-    cr2, cr2_time,
-    use_cr_traj,
-    multiplier
+    cr1, cr1_time, cr2, cr2_time, use_cr_traj, multiplier
 )
 
 # ---------------------------
-# Simulation start
+# Simulation settings
 # ---------------------------
+st.header("Simulation Start & Duration")
 sim_start_date = st.date_input(
     "Simulation Start Date",
     datetime.now().date() - timedelta(days=1)
@@ -102,409 +76,176 @@ sim_duration_days = st.number_input(
     value=7,
     step=1,
 )
-
 sim_end = sim_start + timedelta(days=sim_duration_days)
 
 # ---------------------------
-# Build dose list
+# Dose List Construction
 # ---------------------------
-doses = []
+manual_dose_inputs = []
+manual_time_inputs = []
 
-# ---------------------------
-# Manual doses
-# ---------------------------
 st.header("Manual Doses")
-
-manual_doses = []
-manual_times = []
-
-doses += build_manual_doses(
-    manual_doses,
-    manual_times,
-    sim_start
-)
 for i in range(5):
     if st.checkbox(f"Enable manual dose {i+1}", key=f"md_on_{i}"):
-        dose = st.selectbox(
-            "Dose (mg)",
-            [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500],
-            index=3,
-            key=f"md_dose_{i}"
-        )
-        time = st.datetime_input(
-            "Time",
-            sim_start + timedelta(hours=9, minutes=30),
-            key=f"md_time_{i}"
-        )
+        dose = st.selectbox("Dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=3, key=f"md_dose_{i}")
+        time = st.datetime_input("Time", sim_start + timedelta(hours=9, minutes=30), key=f"md_time_{i}")
+        manual_dose_inputs.append(dose)
+        manual_time_inputs.append(time)
 
-        manual_doses.append(dose)
-        manual_times.append(time)
-
-# ---------------------------
-# Ordered dose
-# ---------------------------
 st.header("Ordered Regimen")
-
-show_ordered_dose = st.checkbox(
-    "Display ordered regimen",
-    value=False,
-    key="show_ordered_dose"
-)
-
-ordered_dose = None
-ordered_interval = None
-ordered_start = None
-ordered_results = None
+show_ordered_dose = st.checkbox("Display ordered regimen", value=False)
+ordered_dose, ordered_interval, ordered_start = None, None, None
 
 if show_ordered_dose:
-    ordered_dose = st.selectbox(
-        "Ordered dose (mg)",
-        [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500],
-        index=3,
-        key="ordered_dose"
-    )
+    ordered_dose = st.selectbox("Ordered dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=3)
+    ordered_interval = st.selectbox("Interval (h)", [6, 8, 12, 18, 24, 36, 48, 72], index=2)
+    ordered_start = st.datetime_input("Ordered dose start time", sim_start + timedelta(days=1, hours=9, minutes=30))
+    if ordered_start < sim_start:
+        st.error("Ordered dose start must be on or after simulation start.")
+        st.stop()
 
-    ordered_interval = st.selectbox(
-        "Interval (h)",
-        [6, 8, 12, 18, 24, 36, 48, 72],
-        index=2,
-        key="ordered_interval"
-    )
-
-    ordered_start = st.datetime_input(
-        "Ordered dose start time",
-        sim_start + timedelta(days=1, hours=9, minutes=30),  # Added days=1
-        key="ordered_start"
-    )
-
-if (
-    show_ordered_dose
-    and ordered_start is not None
-    and ordered_start < sim_start
-):
-    st.error("Ordered dose start must be on or after simulation start.")
-    st.stop()
-
-if (
-    show_ordered_dose
-    and ordered_dose is not None
-    and ordered_interval is not None
-    and ordered_start is not None
-):
-    doses += build_ordered_doses(
-        ordered_dose,
-        ordered_interval,
-        ordered_start,
-        sim_start,
-        sim_end
-    )
+doses = build_manual_doses(manual_dose_inputs, manual_time_inputs, sim_start)
+if show_ordered_dose and ordered_dose:
+    doses += build_ordered_doses(ordered_dose, ordered_interval, ordered_start, sim_start, sim_end)
 
 # ---------------------------
-# Levels
+# Measured levels
 # ---------------------------
 st.header("Measured Levels")
-
-levels = []
-level_times = []
-
+levels, level_times = [], []
 for i in range(5):
     if st.checkbox(f"Enable level {i+1}", key=f"lvl_on_{i}"):
-        lvl = st.number_input(
-            "Level (mg/L)",
-            0.0, 100.0, 15.0,
-            step=0.1, format="%.1f",
-            key=f"lvl_val_{i}"
-        )
-        t = st.datetime_input(
-            "Time",
-            sim_start + timedelta(hours=9),
-            key=f"lvl_time_{i}"
-        )
+        lvl = st.number_input("Level (mg/L)", 0.0, 100.0, 15.0, step=0.1, key=f"lvl_val_{i}")
+        t = st.datetime_input("Time", sim_start + timedelta(hours=9), key=f"lvl_time_{i}")
         levels.append(lvl)
         level_times.append(t)
 
 # ---------------------------
-# Try regimen
+# Core Simulation Logic
 # ---------------------------
-st.header("Try Regimen/Suggested Regimen")
-
-show_try_regimen = st.checkbox(
-    "Show try/suggested regimen on graph",
-    value=False,
-    key="show_try_regimen"
-)
-
-# Placeholder (filled after PK sim runs)
-try_dose = None
-try_interval = None
-
-
-# ---------------------------
-# Run simulation
-# ---------------------------
-ke, vd = pk_params_from_patient(
-    age=age,
-    sex=sex,
-    weight_kg=weight,
-    height_cm=height,
-    cr_func=cr_func,
-    when=sim_start,
-)
-
-pk = VancoPK(ke, vd)
-
-# --- instantiate PK engine ---
-pk = VancoPK(ke, vd)
-
-doses = build_manual_doses(manual_doses, manual_times, sim_start)
-if show_ordered_dose:
-    doses += build_ordered_doses(
-        ordered_dose,
-        ordered_interval,
-        ordered_start,
-        sim_start,
-        sim_end
-    )
-
-results = pk.run(doses)
-
-if show_ordered_dose:
-    ordered_results = results  # ordered doses are part of the main simulation
-
-# ---------------------------
-# Suggested regimen
-# ---------------------------
-suggested_dose, suggested_interval, predicted_auc = suggest_regimen(
-    pk, target_auc=500
-)
-
-st.subheader("Suggested regimen")
-st.markdown(
-    f"**{suggested_dose} mg IV q{suggested_interval}h**  "
-    f"(Predicted AUC24 ≈ {predicted_auc:.0f})"
-)
-
-# Prepopulate try regimen
-try_dose = st.selectbox(
-    "Try dose (mg)",
-    [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500],
-    index=[250,500,750,1000,1250,1500,1750,2000,2500].index(suggested_dose)
-)
-
-try_interval = st.selectbox(
-    "Try interval (h)",
-    [6, 8, 12, 18, 24, 36, 48, 72],
-    index=[6,8,12,18,24,36,48,72].index(suggested_interval)
-)
-
-# ---------------------------
-# Confidence intervals
-# ---------------------------
+ke_pop, vd = pk_params_from_patient(age, sex, weight, height, cr_func, sim_start)
+pk = VancoPK(ke_pop, vd)
 
 if len(levels) >= 1:
-    # Bayesian best-fit ke
     pk.fit_ke_from_levels(doses, level_times, levels, sim_start)
-
-    # ke CI
-    ke_lo, ke_hi = pk.compute_ci(level=0.5)
-    st.info(f"50% CI for ke: {ke_lo:.3f} – {ke_hi:.3f}")
-
-    # Dose CI (only if implemented)
-    dose_lo, dose_hi = dose_ci_from_ke(
-        pk,
-        target_auc=500,
-        interval_h=suggested_interval,
-        level=0.5,
-    )
-
-    if dose_lo is not None:
-        st.info(
-            f"Suggested dose CI (50%): "
-            f"{dose_lo:.0f} – {dose_hi:.0f} mg q{suggested_interval}h"
-        )
-    else:
-        st.warning("Dose confidence interval unavailable.")
-
+    st.info(f"Model fitted to {len(levels)} level(s).")
 else:
-    st.warning(
-        "Confidence intervals are unreliable without measured vancomycin levels."
-    )
+    st.warning("Using population PK estimates.")
 
-def ci_strength_label(n_levels):
-    if n_levels == 0:
-        return "Population estimate only"
-    elif n_levels == 1:
-        return "Low confidence (1 level)"
-    elif n_levels == 2:
-        return "Moderate confidence (2 levels)"
-    else:
-        return "Higher confidence (≥3 levels)"
+# Pack patient data for the simulation loop
+p_info = {
+    'age': age, 'sex': sex, 
+    'weight': weight, 'height': height
+}
 
-# ===========================
-# Plot
-# ===========================
-fig, ax = plt.subplots(figsize=(14, 6))
-
-# ---- Entered regimen (manual + ordered doses) ----
-t_hours = results["time"]
-t_dates = [sim_start + timedelta(hours=h) for h in t_hours]
-conc = results["conc"]
-
-ax.plot(
-    t_dates,
-    conc,
-    color="blue",
-    linewidth=2,
-    label="Entered regimen"
+# Run simulation
+results = pk.run(
+    doses, 
+    duration_days=sim_duration_days, 
+    sim_start=sim_start, 
+    cr_func=cr_func, 
+    patient_info=p_info
 )
 
-# ---- Try regimen (optional overlay) ----
+# ---------------------------
+# Suggested Regimen
+# ---------------------------
+st.header("Try Regimen / Suggested Regimen")
+suggested_dose, suggested_interval, predicted_auc = suggest_regimen(pk, target_auc=500)
+st.markdown(f"**Suggested: {suggested_dose} mg q{suggested_interval}h** (AUC24 ≈ {predicted_auc:.0f})")
+
+show_try_regimen = st.checkbox("Show try/suggested regimen on graph", value=False)
+try_dose = st.selectbox("Try dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500], 
+                        index=[250,500,750,1000,1250,1500,1750,2000,2500].index(suggested_dose))
+try_interval = st.selectbox("Try interval (h)", [6, 8, 12, 18, 24, 36, 48, 72], 
+                            index=[6,8,12,18,24,36,48,72].index(suggested_interval))
+
+# ---------------------------
+# Plotting (Dual Axis)
+# ---------------------------
+fig, ax1 = plt.subplots(figsize=(12, 6))
+
+t_dates = [sim_start + timedelta(hours=h) for h in results["time"]]
+ax1.plot(t_dates, results["conc"], color="blue", linewidth=2, label="Vanco (Entered)")
+
+# CI shading logic
+# 1. Get the CI Multipliers (relative to the patient's curve)
+mult_lo, mult_hi = pk.compute_ci(level=0.5)
+current_fitted_mult = pk.ke_multiplier # Save the best fit to restore later
+
+# 2. Simulate the LOWER bound (Higher clearance = Lower levels)
+pk.ke_multiplier = mult_hi 
+res_lo_bound = pk.run(doses, duration_days=sim_duration_days, sim_start=sim_start, 
+                      cr_func=cr_func, patient_info=p_info)
+
+# 3. Simulate the UPPER bound (Lower clearance = Higher levels)
+pk.ke_multiplier = mult_lo
+res_hi_bound = pk.run(doses, duration_days=sim_duration_days, sim_start=sim_start, 
+                      cr_func=cr_func, patient_info=p_info)
+
+# 4. RESTORE the best fit multiplier for the rest of the app logic
+pk.ke_multiplier = current_fitted_mult
+
+# 5. Plot the dynamic shaded area
+ax1.fill_between(t_dates, res_lo_bound["conc"], res_hi_bound["conc"], 
+                 color="blue", alpha=0.1, label="50% CI (Fitted Multiplier)")
+# -------------------------------
+
 try_results = None
-
 if show_try_regimen:
-    try_results = pk.simulate_regimen(
-        try_dose,
-        try_interval,
-        sim_start,
-        sim_end
-    )
+    try_results = pk.simulate_regimen(try_dose, try_interval, sim_start, sim_end)
+    ax1.plot([sim_start + timedelta(hours=h) for h in try_results["time"]], 
+             try_results["conc"], color="green", linestyle="--", alpha=0.6, label="Try Regimen")
 
-if try_results is not None:
-    t_try = [sim_start + timedelta(hours=h) for h in try_results["time"]]
-    ax.plot(
-        t_try,
-        try_results["conc"],
-        color="green",
-        linestyle="--",
-        alpha=0.5,
-        linewidth=2,
-        label="Try regimen"
-    )
-
-# ---- Measured levels ----
 for lvl, t in zip(levels, level_times):
-    ax.scatter(
-        t,
-        lvl,
-        color="#ff5733",
-        s=60,
-        zorder=5,
-        label=None
-    )
-    ax.text(
-        t,
-        lvl + 0.8,
-        f"{lvl:.1f} mg/L @ {t.strftime('%H:%M')}",
-        fontsize=9,
-        color="#ff5733",
-        ha="center"
-    )
+    ax1.scatter(t, lvl, color="#ff5733", s=60, zorder=5)
 
-# ---- Dose markers & labels ----
-ax.autoscale()
-y_top = ax.get_ylim()[1] * 0.95
+ax1.set_ylabel("Vancomycin (mg/L)", color="blue", fontweight='bold')
+ax1.tick_params(axis='y', labelcolor="blue")
 
-for t_h, dose_mg in doses:
-    t_dose = sim_start + timedelta(hours=t_h)
-    ax.axvline(
-        t_dose,
-        color="lightgrey",
-        linestyle=":",
-        alpha=0.6,
-        zorder=0
-    )
-    ax.text(
-        t_dose,
-        y_top,
-        f"{dose_mg} mg",
-        rotation=90,
-        fontsize=8,
-        color="lightgrey",
-        va="top",
-        ha="center"
-    )
+ax2 = ax1.twinx()
+cr_vals = [cr_func(sim_start + timedelta(hours=h)) for h in results["time"]]
+ax2.plot(t_dates, cr_vals, color="purple", linestyle=":", linewidth=1.5, alpha=0.6, label="Creatinine")
 
-if len(levels) >= 1:
-    ke_lo, ke_hi = pk.compute_ci(level=0.5)
+# Always plot the first creatinine point
+ax2.scatter(cr1_time, cr1, color="purple", marker="x", s=60, label="Cr Point 1")
 
-    # Lower bound
-    pk_lo = VancoPK(ke_lo, pk.vd)
-    res_lo = pk_lo.run(doses, duration_days=sim_duration_days)
+# Only plot the second point if the user is actually in "Two-Point" mode
+if cr_mode == "Two-Point Linear Trend" and cr2_time is not None:
+    ax2.scatter(cr2_time, cr2, color="purple", marker="x", s=60, label="Cr Point 2")
 
-    # Upper bound
-    pk_hi = VancoPK(ke_hi, pk.vd)
-    res_hi = pk_hi.run(doses, duration_days=sim_duration_days)
+ax2.set_ylabel("Creatinine (µmol/L)", color="purple", fontweight='bold')
+ax2.tick_params(axis='y', labelcolor="purple")
+ax2.set_ylim(min(cr_vals)*0.8, max(cr_vals)*1.2)
 
-    t_ci = [sim_start + timedelta(hours=h) for h in res_lo["time"]]
-
-    ax.fill_between(
-        t_ci,
-        res_lo["conc"],
-        res_hi["conc"],
-        color="blue",
-        alpha=0.15,
-        label="50% CI (ke)"
-    )
-
-# ---- Axes formatting ----
-ax.set_xlabel("Date")
-ax.set_ylabel("Vancomycin concentration (mg/L)")
-ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-ax.legend()
-ax.grid(alpha=0.2)
+ax1.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+ax1.grid(alpha=0.2)
+h1, l1 = ax1.get_legend_handles_labels()
+h2, l2 = ax2.get_legend_handles_labels()
+ax1.legend(h1+h2, l1+l2, loc='upper left', frameon=True, framealpha=0.5)
 
 st.pyplot(fig)
 
-st.caption(ci_strength_label(len(levels)))
-
 # ---------------------------
-# Entered regimen stats display
+# Metrics with Color-Coding
 # ---------------------------
+def show_metrics(label, res):
+    st.subheader(label)
+    cols = st.columns(4)
+    cols[0].metric("ke (1/h)", f"{res['ke']:.3f}")
+    cols[1].metric("Half-life (h)", f"{res['half_life']:.1f}")
+    cols[2].metric("Vd (L)", f"{res['vd']:.1f}")
+    cols[3].metric("AUC24", f"{res['auc24']:.0f}")
 
-ke = results["ke"]
-t_half = results["half_life"]
-vd = results["vd"]
-auc24 = results["auc24"]
-
-st.subheader("PK Summary (Entered Regimen)")
-
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("ke (1/h)", f"{ke:.3f}")
-col2.metric("Half-life (h)", f"{t_half:.1f}")
-col3.metric("Vd (L)", f"{vd:.1f}")
-col4.metric("AUC24", f"{auc24:.0f}")
-
-if auc24 < 400:
-    st.error("AUC24 below target (400–600)")
-elif auc24 > 600:
-    st.error("AUC24 above target (400–600)")
-else:
-    st.success("AUC24 within target (400–600)")
-
-# ---------------------------
-# Try Regimen stats display
-# ---------------------------
-
-if try_results is not None:
-    ke_try = try_results["ke"]
-    t_half_try = try_results["half_life"]
-    vd_try = try_results["vd"]
-    auc24_try = try_results["auc24"]
-
-    st.subheader("PK Summary (Try / Suggested Regimen)")
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric("ke (1/h)", f"{ke_try:.3f}")
-    col2.metric("Half-life (h)", f"{t_half_try:.1f}")
-    col3.metric("Vd (L)", f"{vd_try:.1f}")
-    col4.metric("AUC24", f"{auc24_try:.0f}")
-
-    if auc24_try < 400:
-        st.error("Try regimen AUC24 below target (400–600)")
-    elif auc24_try > 600:
-        st.error("Try regimen AUC24 above target (400–600)")
+    # Color coding logic for AUC24
+    auc = res['auc24']
+    if 400 <= auc <= 600:
+        st.success(f"AUC24 of {auc:.0f} is within target range (400-600).")
+    elif auc < 400:
+        st.error(f"AUC24 of {auc:.0f} is below target range (< 400).")
     else:
-        st.success("Try regimen AUC24 within target (400–600)")
+        st.error(f"AUC24 of {auc:.0f} is above target range (> 600).")
 
+show_metrics("Summary: Entered Regimen", results)
+if try_results:
+    show_metrics("Summary: Try Regimen", try_results)

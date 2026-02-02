@@ -29,19 +29,19 @@ def build_creatinine_function(
         return cr_func
 
     # -------------------------
-    # Case 2: crude multiplier trajectory
+    # Case 2: Crude multiplier trajectory (Asymptotic)
     # -------------------------
     if cr2 is None and use_multiplier:
-        duration_days = 4.0
         cr_target = cr1 * multiplier
+        # k=0.03 provides a curve that is ~95% complete at 4 days (96 hours)
+        k_decay = 0.03 
 
         def cr_func(t):
-            dt_days = (t - t1).total_seconds() / 86400
-            if dt_days <= 0:
-                return cr1
-            if dt_days >= duration_days:
-                return cr_target
-            return cr1 + (cr_target - cr1) * (dt_days / duration_days)
+            dt_hours = (t - t1).total_seconds() / 3600
+            if dt_hours <= 0:
+                return float(cr1)
+            # Asymptotic approach formula
+            return cr_target + (cr1 - cr_target) * np.exp(-k_decay * dt_hours)
 
         return cr_func
 
