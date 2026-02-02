@@ -141,17 +141,34 @@ class VancoPK:
             "auc24": (conc[-240:].sum() * dt) if len(conc) >= 240 else 0
         }
 
-    def simulate_regimen(self, dose_mg, interval_h, start_datetime, end_datetime, dt=0.1):
-        """Simulate a standing regimen between two datetimes."""
-        total_hours = (end_datetime - start_datetime).total_seconds() / 3600.0
-        doses = []
-        t = 0.0
-        while t <= total_hours:
-            doses.append((t, dose_mg))
-            t += interval_h
+    def simulate_regimen(self, dose_mg, interval_h, sim_start, sim_end, cr_func=None, patient_info=None):
+        """
+        Correctly simulates a regimen while preserving the Bayesian fit 
+        and time-varying creatinine trends.
+        """
+        from dosing import build_ordered_doses
+        
+        # 1. Use the existing helper to correctly space doses relative to sim_start
+        # We start the 'try' regimen at sim_start to show the full comparison
+        doses = build_ordered_doses(
+            dose_mg=dose_mg, 
+            interval_h=interval_h, 
+            start_dt=sim_start, 
+            sim_start=sim_start, 
+            sim_end=sim_end
+        )
 
-        duration_days = total_hours / 24.0
-        return self.run(doses, duration_days, dt)
+        # 2. Calculate duration
+        duration_days = (sim_end - sim_start).total_seconds() / 86400.0
+
+        # 3. Call run() with ALL the context required for dynamic ke
+        return self.run(
+            doses=doses, 
+            duration_days=duration_days, 
+            sim_start=sim_start, 
+            cr_func=cr_func, 
+            patient_info=patient_info
+        )
 
     def predict_at_times(self, doses, times_h):
         """

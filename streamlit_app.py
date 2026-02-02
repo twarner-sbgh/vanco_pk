@@ -4,12 +4,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import matplotlib.dates as mdates
-from vanco_pk import VancoPK, pk_params_from_patient, dose_ci_from_ke
+from vanco_pk import VancoPK, pk_params_from_patient
 from creatinine import build_creatinine_function
 from dosing import (
     build_manual_doses,
     build_ordered_doses,
-    build_try_regimen,
     suggest_regimen
 )
 
@@ -193,7 +192,15 @@ ax1.fill_between(t_dates, res_lo_bound["conc"], res_hi_bound["conc"],
 
 try_results = None
 if show_try_regimen:
-    try_results = pk.simulate_regimen(try_dose, try_interval, sim_start, sim_end)
+    try_results = pk.simulate_regimen(
+        try_dose, 
+        try_interval, 
+        sim_start, 
+        sim_end, 
+        cr_func=cr_func, 
+        patient_info=p_info
+    )
+    
     ax1.plot([sim_start + timedelta(hours=h) for h in try_results["time"]], 
              try_results["conc"], color="green", linestyle="--", alpha=0.6, label="Try Regimen")
 

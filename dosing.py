@@ -40,19 +40,6 @@ def build_ordered_doses(dose_mg, interval_h, start_dt, sim_start, sim_end):
 # Try regimen
 # ----------------------------
 
-def build_try_regimen(
-    dose_mg,
-    interval_h,
-    sim_start,
-    sim_end,
-):
-    doses = []
-    t = sim_start
-    while t <= sim_end:
-        th = (t - sim_start).total_seconds() / 3600
-        doses.append((th, dose_mg))
-        t += timedelta(hours=interval_h)
-    return doses
 
 
 # ----------------------------
