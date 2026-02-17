@@ -196,7 +196,7 @@ fig = plot_vanco_simulation(
     cr_func=cr_func,
     levels=levels,
     level_times=level_times,
-    try_results=try_results if show_try_regimen else None,
+    try_results=try_results, # No longer needs 'if show_try_regimen else None'
     ci_bounds=ci_bounds
 )
 
