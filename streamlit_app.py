@@ -207,7 +207,7 @@ fig = plot_vanco_simulation(
     ci_bounds=ci_bounds
 )
 
-st.pyplot(fig)
+st.plotly_chart(fig, use_container_width=True)
 
 # ---------------------------
 # Metrics with Color-Coding
