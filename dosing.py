@@ -46,12 +46,11 @@ def build_ordered_doses(dose_mg, interval_h, start_dt, sim_start, sim_end):
 # Suggested regimen
 # ----------------------------
 
-def suggest_regimen(
-    pk_model,
-    target_auc=500,
-):
+def suggest_regimen(pk_model, target_auc=500):
     """
-    Suggests a dose + interval that targets AUC24 ≈ target_auc
+    Suggests a dose + interval that targets AUC24 ≈ target_auc.
+    Uses the individual fitted clearance derived from population ke 
+    and the Bayesian multiplier.
 
     Returns:
         dose_mg, interval_h, predicted_auc24
@@ -60,32 +59,35 @@ def suggest_regimen(
     allowed_intervals = [6, 8, 12, 18, 24, 36, 48, 72]
     allowed_doses = np.array([250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500])
 
-    # Estimated clearance from PK model
-    cl = pk_model.clearance   # L/h
-    vd = pk_model.vd          # L
+    # FIX: Calculate current individual clearance
+    # cl = (Base Population ke * Multiplier) * Vd
+    cl = (pk_model.ke * pk_model.ke_multiplier) * pk_model.vd  # L/h
+    vd = pk_model.vd                                          # L
 
+    # Calculate half-life for interval selection logic
     half_life = np.log(2) * vd / cl
 
     best = None
     best_err = float("inf")
 
     for interval in allowed_intervals:
-        # Favor intervals close to half-life
+        # Favor intervals close to half-life to minimize peak/trough swings
         interval_penalty = abs(interval - half_life)
 
         # AUC24 ≈ daily dose / clearance
         target_daily_dose = target_auc * cl
 
-        # Convert to per-dose amount
+        # Convert to per-dose amount based on the interval
         doses_per_day = 24 / interval
         dose_est = target_daily_dose / doses_per_day
 
-        # Round to nearest 250 mg
-        dose_rounded = allowed_doses[np.argmin(np.abs(allowed_doses - dose_est))]
+        # Round to nearest allowed dose (250 mg increments)
+        dose_rounded = int(allowed_doses[np.argmin(np.abs(allowed_doses - dose_est))])
 
-        # Predict AUC24
+        # Predict AUC24 for this candidate regimen
         predicted_auc = (dose_rounded * doses_per_day) / cl
 
+        # Scoring function: Balance AUC accuracy with clinical appropriateness (interval penalty)
         err = abs(predicted_auc - target_auc) + interval_penalty * 5
 
         if err < best_err:

@@ -1,9 +1,8 @@
-# vanco_pk.py
 import numpy as np
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta # datetime used for type hinting or future extensions
 
-INFUSION_RATE = 1000.0  # mg/hour
+INFUSION_RATE = 1000.0  # mg/hour - fixed infusion rate for all doses (1g/hr)
 LN2 = np.log(2)
 
 @dataclass
@@ -12,248 +11,182 @@ class Dose:
     amount: float
     ke: float = None
 
-def pk_params_from_patient(
-    age,
-    sex,
-    weight_kg,
-    height_cm,
-    cr_func,
-    when,
-):
+def pk_params_from_patient(age, sex, weight_kg, height_cm, cr_func, when):
     """
     Returns ke (1/h) and Vd (L) from patient characteristics.
     """
-    # -------------------------
-    # Creatinine at time point
-    # -------------------------
-    cr = cr_func(when)  # µmol/L
-
-    # -------------------------
-    # Weightless Cockcroft–Gault
-    # -------------------------
+    cr = cr_func(when)
     crcl = (140 - age) * 88.4 / cr
     if sex.lower().startswith("f"):
         crcl *= 0.85
 
-    # Serum-to-plasma Cr correction
-    crcl *= 0.9  # REQUIRED
-
-    # -------------------------
-    # Matzke elimination
-    # -------------------------
+    crcl *= 0.9  # Serum-to-plasma Cr correction
     ke = 0.00083 * crcl + 0.0044
 
-    KE_MAX = 0.693 / 5.5   # fastest allowed elimination
-    KE_MIN = 0.693 / 120  # very slow elimination safety floor
+    # Safety floors/ceilings
+    ke = max(min(ke, 0.693 / 5.5), 0.693 / 120)
 
-    ke = min(ke, KE_MAX)
-    ke = max(ke, KE_MIN)
-
-    # -------------------------
-    # Ideal & dosing body weight
-    # -------------------------
     if sex.lower().startswith("m"):
         ibw = 50 + 0.9 * (height_cm - 152)
     else:
         ibw = 45.5 + 0.9 * (height_cm - 152)
 
-    if weight_kg > 1.25 * ibw:
-        # Obese → dosing body weight
-        dbw = ibw + 0.4 * (weight_kg - ibw)
-        weight_for_vd = dbw
-    else:
-        # Non-obese → actual body weight
-        weight_for_vd = weight_kg
-
-    # -------------------------
-    # Volume of distribution
-    # -------------------------
-    vd = 0.75 * weight_for_vd  # L
+    weight_for_vd = ibw + 0.4 * (weight_kg - ibw) if weight_kg > 1.25 * ibw else weight_kg
+    vd = 0.75 * weight_for_vd
 
     return ke, vd
 
-
 class VancoPK:
     def __init__(self, ke, vd):
-        self.ke = ke  # Population base ke
+        self.ke = ke # Population base ke (will be updated to reflect current state)
         self.vd = vd
-        self.ke_multiplier = 1.0  # NEW: The scaling factor from fitting
-        self.ke_sd = 0.2 * ke     # Standard deviation
-
-    @property
-    def clearance(self):
-        """Clearance in L/h"""
-        return self.ke * self.vd
-
-    @property
-    def half_life(self):
-        """Half-life in hours"""
-        return 0.693 / self.ke if self.ke > 0 else float("inf")
+        self.ke_multiplier = 1.0
+        self.multiplier_sd = 0.2
 
     def run(self, doses, duration_days=7, sim_start=None, cr_func=None, patient_info=None):
         t_max = duration_days * 24
-        # 0.1 hour steps for smooth curves and numerical stability
-        t_grid = np.linspace(0, t_max, int(t_max * 10) + 1) 
+        t_grid = np.linspace(0, t_max, int(t_max * 10) + 1)
         dt = t_grid[1] - t_grid[0]
         
-        conc = np.zeros_like(t_grid)
-        current_conc = 0.0
-        
-        # We track ke for the summary metrics at the end
-        last_ke = self.ke 
-
-        for i, t_h in enumerate(t_grid):
-            # 1. DYNAMIC KE UPDATE
-            if cr_func and patient_info and sim_start:
-                current_dt = sim_start + timedelta(hours=t_h)
-                # Recalculate based on patient characteristics at THIS specific time
-                new_ke, _ = pk_params_from_patient(
+        pop_ke_traj = np.full_like(t_grid, self.ke)
+        if cr_func and patient_info and sim_start:
+            for i, t_h in enumerate(t_grid):
+                pop_ke_traj[i], _ = pk_params_from_patient(
                     patient_info['age'], patient_info['sex'], 
                     patient_info['weight'], patient_info['height'], 
-                    cr_func, current_dt
+                    cr_func, sim_start + timedelta(hours=t_h)
                 )
-                # Apply the Bayesian multiplier (if any) to the new pop-ke
-                active_ke = new_ke * getattr(self, 'ke_multiplier', 1.0)
-                last_ke = active_ke
-            else:
-                active_ke = self.ke
+        
+        # UPDATED: Update self.ke to the LATEST population value so metrics/suggestions are current
+        self.ke = pop_ke_traj[-1] 
 
-            # 2. INFUSION LOGIC (Preserved)
-            input_rate = 0.0
-            for t_dose, amt in doses:
-                infusion_duration = amt / INFUSION_RATE
-                if t_dose <= t_h <= (t_dose + infusion_duration):
-                    input_rate = INFUSION_RATE / self.vd
+        conc = np.zeros_like(t_grid)
+        curr_c = 0.0
+        for i, t_h in enumerate(t_grid):
+            active_ke = pop_ke_traj[i] * self.ke_multiplier
+            rate_in = 0.0
+            for t_d, amt in doses:
+                if t_d <= t_h <= (t_d + amt/INFUSION_RATE):
+                    rate_in = INFUSION_RATE / self.vd
                     break
-
-            # 3. DIFFERENTIAL EQUATION STEP (Euler Method)
-            # dC/dt = (Infusion_In / Vd) - (ke * C)
-            dC = (input_rate - active_ke * current_conc) * dt
-            current_conc += dC
-            conc[i] = max(current_conc, 0) # Prevent negative numbers
+            curr_c += (rate_in - active_ke * curr_c) * dt
+            conc[i] = max(curr_c, 0)
 
         return {
             "time": t_grid,
             "conc": conc,
-            "ke": last_ke,
+            "ke": self.ke * self.ke_multiplier,
             "vd": self.vd,
-            "half_life": np.log(2) / last_ke if last_ke > 0 else 0,
+            "half_life": LN2 / (self.ke * self.ke_multiplier),
             "auc24": (conc[-240:].sum() * dt) if len(conc) >= 240 else 0
         }
 
-    def simulate_regimen(self, dose_mg, interval_h, sim_start, sim_end, cr_func=None, patient_info=None):
-        """
-        Correctly simulates a regimen while preserving the Bayesian fit 
-        and time-varying creatinine trends.
-        """
-        from dosing import build_ordered_doses
-        
-        # 1. Use the existing helper to correctly space doses relative to sim_start
-        # We start the 'try' regimen at sim_start to show the full comparison
-        doses = build_ordered_doses(
-            dose_mg=dose_mg, 
-            interval_h=interval_h, 
-            start_dt=sim_start, 
-            sim_start=sim_start, 
-            sim_end=sim_end
-        )
-
-        # 2. Calculate duration
-        duration_days = (sim_end - sim_start).total_seconds() / 86400.0
-
-        # 3. Call run() with ALL the context required for dynamic ke
-        return self.run(
-            doses=doses, 
-            duration_days=duration_days, 
-            sim_start=sim_start, 
-            cr_func=cr_func, 
-            patient_info=patient_info
-        )
-
-    def predict_at_times(self, doses, times_h):
-        """
-        Predict concentrations at specific times using the SAME engine as run()
-        """
-        t_end = max(times_h) + 0.1
-        time = np.arange(0, t_end + 0.1, 0.1)
-        conc = np.zeros_like(time)
-
-        # build infusions
-        infusions = []
-        for t_dose, dose_mg in doses:
-            dur = dose_mg / INFUSION_RATE
-            infusions.append((t_dose, t_dose + dur))
-
-        for i in range(1, len(time)):
-            c_prev = conc[i - 1]
-            dc = -self.ke * c_prev * 0.1
-
-            rate_in = 0.0
-            for t0, t1 in infusions:
-                if t0 <= time[i] < t1:
-                    rate_in += INFUSION_RATE / self.vd
-
-            conc[i] = c_prev + (dc + rate_in * 0.1)
-
-        return np.interp(times_h, time, conc)
-
-
-    def fit_ke_from_levels(self, doses, times_dt, obs, sim_start, cr_func, patient_info):
-        # Convert datetimes to hours since sim_start
-        times_h = [(t - sim_start).total_seconds() / 3600 for t in times_dt]
-        obs = np.array(obs)
-
-        # We search for a multiplier between 0.3x and 3.0x of population ke
-        mult_grid = np.linspace(0.3, 3.0, 100)
-        log_post = []
-        sigma = 2.0  # Level measurement error SD
-
-        for m in mult_grid:
-            self.ke_multiplier = m
-            # Run a mini-sim to get predicted levels at the exact times
-            # Note: You must ensure self.run() uses self.ke_multiplier inside its loop!
-            res = self.run(doses, duration_days=7, sim_start=sim_start, 
-                           cr_func=cr_func, patient_info=patient_info)
+    def simulate_regimen(self, dose_mg, interval_h, start_dt, end_dt, cr_func, patient_info):
+            """
+            Calculates a sequence of doses based on an interval and runs the simulation.
+            """
+            # 1. Determine total simulation hours
+            duration_h = (end_dt - start_dt).total_seconds() / 3600
+            duration_days = duration_h / 24
             
-            # Interpolate predicted concentrations at the specific observation times
-            preds = np.interp(times_h, res["time"], res["conc"])
+            # 2. Build the list of doses [(time_in_hours, amount), ...]
+            try_doses = []
+            curr_t = 0.0
+            while curr_t < duration_h:
+                try_doses.append((curr_t, dose_mg))
+                curr_t += interval_h
+                
+            # 3. Call the optimized run method with the necessary dynamic info
+            return self.run(
+                doses=try_doses, 
+                duration_days=duration_days, 
+                sim_start=start_dt, 
+                cr_func=cr_func, 
+                patient_info=patient_info
+            )
 
-            ll = -np.sum((obs - preds) ** 2 / (2 * sigma ** 2))
-            # Prior: Expect the multiplier to be near 1.0 (population estimate)
-            prior = -((m - 1.0) ** 2) / (2 * 0.3 ** 2)
-            log_post.append(ll + prior)
+    def _run_fast(self, doses, t_grid, ke_traj, multiplier):
+        """Internal helper for the fitting loop."""
+        dt = t_grid[1] - t_grid[0]
+        conc = np.zeros_like(t_grid)
+        curr_c = 0.0
+        for i, t_h in enumerate(t_grid):
+            active_ke = ke_traj[i] * multiplier
+            rate_in = 0.0
+            for t_d, amt in doses:
+                if t_d <= t_h <= (t_d + amt/INFUSION_RATE):
+                    rate_in = INFUSION_RATE / self.vd
+                    break
+            curr_c += (rate_in - active_ke * curr_c) * dt
+            conc[i] = max(curr_c, 0)
+        return conc
 
-        # Pick the best multiplier
-        idx = np.argmax(log_post)
-        self.ke_multiplier = mult_grid[idx]
-        
-        # Approximate the SD of the multiplier for the CI
-        d2 = np.gradient(np.gradient(log_post, mult_grid), mult_grid)
-        self.multiplier_sd = np.sqrt(-1 / d2[idx]) if d2[idx] < 0 else 0.2
-        return self.ke_multiplier
+    def fit_ke_from_levels(self, doses, times_dt, obs, sim_start, cr_func, patient_info, duration_days=7):
+            """
+            UPDATED: Accepts duration_days to ensure fitting window matches simulation window.
+            """
+            times_h = [(t - sim_start).total_seconds() / 3600 for t in times_dt]
+            obs = np.array(obs)
 
+            t_max = duration_days * 24 # Dynamic window
+            t_grid = np.linspace(0, t_max, int(t_max * 10) + 1)
+            
+            # Pre-calculate once
+            pop_ke_traj = np.array([
+                pk_params_from_patient(
+                    patient_info['age'], patient_info['sex'], 
+                    patient_info['weight'], patient_info['height'], 
+                    cr_func, sim_start + timedelta(hours=th)
+                )[0] for th in t_grid
+            ])
+
+            mult_grid = np.linspace(0.3, 3.0, 100)
+            log_post = []
+            for m in mult_grid:
+                res_conc = self._run_fast(doses, t_grid, pop_ke_traj, m)
+                preds = np.interp(times_h, t_grid, res_conc)
+                ll = -np.sum((obs - preds) ** 2 / (2 * 2.0 ** 2))
+                prior = -((m - 1.0) ** 2) / (2 * 0.3 ** 2)
+                log_post.append(ll + prior)
+
+            idx = np.argmax(log_post)
+            self.ke_multiplier = mult_grid[idx]
+            d2 = np.gradient(np.gradient(log_post, mult_grid), mult_grid)
+            self.multiplier_sd = np.sqrt(-1 / d2[idx]) if d2[idx] < 0 else 0.2
+            return self.ke_multiplier
+
+    # Confidence interval logic based on the fitted multiplier uncertainty
     def compute_ci(self, level=0.5):
-        z = 0.674 if level == 0.5 else 1.96
-        sd = getattr(self, 'multiplier_sd', 0.2)
-        lo_mult = max(self.ke_multiplier - z * sd, 0.1)
-        hi_mult = self.ke_multiplier + z * sd
-        return lo_mult, hi_mult
+            """
+            Calculates the multiplier bounds for the confidence interval.
+            level=0.5 corresponds to a 50% CI (Interquartile Range).
+            """
+            # z-score: 0.674 for 50% CI (IQR), 1.96 for 95% CI
+            z = 0.674 if level == 0.5 else 1.96
+            
+            # Use the uncertainty (SD) calculated during the Bayesian fit
+            # Default to 0.2 if no fit has been performed yet
+            sd = getattr(self, 'multiplier_sd', 0.2)
+            
+            # Calculate bounds (ensuring they don't drop below a physical floor of 0.1)
+            lo_mult = max(self.ke_multiplier - z * sd, 0.1)
+            hi_mult = self.ke_multiplier + z * sd
+            
+            return lo_mult, hi_mult
 
-
-def dose_ci_from_ke(pk, target_auc, interval_h, n=1000, level=0.5):
+# Align dose suggestions with fitted uncertainty
+def dose_ci_from_ke(pk, target_auc, interval_h, n=1000):
     """
-    Calculates dose confidence interval based on ke uncertainty.
-    This is a standalone function called by streamlit_app.py.
+    Calculates dose confidence interval based on the Bayesian multiplier uncertainty.
     """
-    sd = pk.ke_sd if pk.ke_sd else 0.2 * pk.ke
-    ke_samples = np.random.normal(pk.ke, sd, n)
-    ke_samples = ke_samples[ke_samples > 0]
+    mult_samples = np.random.normal(pk.ke_multiplier, pk.multiplier_sd, n)
+    mult_samples = mult_samples[mult_samples > 0.1]
 
     doses = []
-    for k in ke_samples:
-        cl = k * pk.vd
-        auc_per_mg = interval_h / cl
-        dose = target_auc / auc_per_mg
-        doses.append(dose)
+    for m in mult_samples:
+        cl = (pk.ke * m) * pk.vd
+        # Dose = (Target AUC * CL) * (interval / 24)
+        dose_per_interval = (target_auc * cl) * (interval_h / 24)
+        doses.append(dose_per_interval)
 
     return np.percentile(doses, 25), np.percentile(doses, 75)

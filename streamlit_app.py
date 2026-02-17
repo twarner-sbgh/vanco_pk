@@ -1,7 +1,5 @@
 import streamlit as st
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-import matplotlib.dates as mdates
 from vanco_pk import VancoPK, pk_params_from_patient
 from creatinine import build_creatinine_function
 from dosing import (
@@ -121,20 +119,23 @@ for i in range(5):
 # ---------------------------
 # Core Simulation Logic
 # ---------------------------
+# Pack patient data for the simulation loop
+# Ensure p_info is defined for the fitting logic
+p_info = {
+    'age': age,
+    'sex': sex,
+    'weight': weight,
+    'height': height
+}
+
 ke_pop, vd = pk_params_from_patient(age, sex, weight, height, cr_func, sim_start)
 pk = VancoPK(ke_pop, vd)
 
 if len(levels) >= 1:
-    pk.fit_ke_from_levels(doses, level_times, levels, sim_start)
+    pk.fit_ke_from_levels(doses, level_times, levels, sim_start, cr_func=cr_func, patient_info=p_info)
     st.info(f"Model fitted to {len(levels)} level(s).")
 else:
     st.warning("Using population PK estimates.")
-
-# Pack patient data for the simulation loop
-p_info = {
-    'age': age, 'sex': sex, 
-    'weight': weight, 'height': height
-}
 
 # Run simulation
 results = pk.run(
@@ -158,15 +159,18 @@ try_dose = st.selectbox("Try dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750,
 try_interval = st.selectbox("Try interval (h)", [6, 8, 12, 18, 24, 36, 48, 72], 
                             index=[6,8,12,18,24,36,48,72].index(suggested_interval))
 
-# INITIALIZE HERE to prevent NameError
+# Initialize try_results to prevent NameError
 try_results = None 
 
 if show_try_regimen:
+    # end_dt is usually the start + the simulation duration
+    sim_end = sim_start + timedelta(days=sim_duration_days)
+    
     try_results = pk.simulate_regimen(
-        try_dose, 
-        try_interval, 
-        sim_start, 
-        sim_end, 
+        dose_mg=try_dose, 
+        interval_h=try_interval, 
+        start_dt=sim_start, 
+        end_dt=sim_end,
         cr_func=cr_func, 
         patient_info=p_info
     )
@@ -176,10 +180,13 @@ if show_try_regimen:
 # ---------------------------
 # 1. Prepare CI bounds if necessary
 ci_bounds = None
+
 if len(levels) >= 1:
-    current_fitted_mult = pk.ke_multiplier
     mult_lo, mult_hi = pk.compute_ci(level=0.5)
     
+    current_fitted_mult = pk.ke_multiplier
+    
+    # Simulate bounds for shading
     pk.ke_multiplier = mult_hi 
     res_lo = pk.run(doses, duration_days=sim_duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info)
     
