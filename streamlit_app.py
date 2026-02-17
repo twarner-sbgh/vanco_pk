@@ -9,6 +9,7 @@ from dosing import (
     build_ordered_doses,
     suggest_regimen
 )
+from plotting import plot_vanco_simulation
 
 # ---------------------------
 # Streamlit setup
@@ -157,38 +158,9 @@ try_dose = st.selectbox("Try dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750,
 try_interval = st.selectbox("Try interval (h)", [6, 8, 12, 18, 24, 36, 48, 72], 
                             index=[6,8,12,18,24,36,48,72].index(suggested_interval))
 
-# ---------------------------
-# Plotting (Dual Axis)
-# ---------------------------
-fig, ax1 = plt.subplots(figsize=(12, 6))
+# INITIALIZE HERE to prevent NameError
+try_results = None 
 
-t_dates = [sim_start + timedelta(hours=h) for h in results["time"]]
-ax1.plot(t_dates, results["conc"], color="blue", linewidth=2, label="Vanco (Entered)")
-
-# CI shading logic
-# 1. Get the CI Multipliers (relative to the patient's curve)
-mult_lo, mult_hi = pk.compute_ci(level=0.5)
-current_fitted_mult = pk.ke_multiplier # Save the best fit to restore later
-
-# 2. Simulate the LOWER bound (Higher clearance = Lower levels)
-pk.ke_multiplier = mult_hi 
-res_lo_bound = pk.run(doses, duration_days=sim_duration_days, sim_start=sim_start, 
-                      cr_func=cr_func, patient_info=p_info)
-
-# 3. Simulate the UPPER bound (Lower clearance = Higher levels)
-pk.ke_multiplier = mult_lo
-res_hi_bound = pk.run(doses, duration_days=sim_duration_days, sim_start=sim_start, 
-                      cr_func=cr_func, patient_info=p_info)
-
-# 4. RESTORE the best fit multiplier for the rest of the app logic
-pk.ke_multiplier = current_fitted_mult
-
-# 5. Plot the dynamic shaded area
-ax1.fill_between(t_dates, res_lo_bound["conc"], res_hi_bound["conc"], 
-                 color="blue", alpha=0.1, label="50% CI (Fitted Multiplier)")
-# -------------------------------
-
-try_results = None
 if show_try_regimen:
     try_results = pk.simulate_regimen(
         try_dose, 
@@ -198,36 +170,35 @@ if show_try_regimen:
         cr_func=cr_func, 
         patient_info=p_info
     )
+
+# ---------------------------
+# Plotting (Dual Axis)
+# ---------------------------
+# 1. Prepare CI bounds if necessary
+ci_bounds = None
+if len(levels) >= 1:
+    current_fitted_mult = pk.ke_multiplier
+    mult_lo, mult_hi = pk.compute_ci(level=0.5)
     
-    ax1.plot([sim_start + timedelta(hours=h) for h in try_results["time"]], 
-             try_results["conc"], color="green", linestyle="--", alpha=0.6, label="Try Regimen")
+    pk.ke_multiplier = mult_hi 
+    res_lo = pk.run(doses, duration_days=sim_duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info)
+    
+    pk.ke_multiplier = mult_lo
+    res_hi = pk.run(doses, duration_days=sim_duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info)
+    
+    pk.ke_multiplier = current_fitted_mult
+    ci_bounds = (res_lo, res_hi)
 
-for lvl, t in zip(levels, level_times):
-    ax1.scatter(t, lvl, color="#ff5733", s=60, zorder=5)
-
-ax1.set_ylabel("Vancomycin (mg/L)", color="blue", fontweight='bold')
-ax1.tick_params(axis='y', labelcolor="blue")
-
-ax2 = ax1.twinx()
-cr_vals = [cr_func(sim_start + timedelta(hours=h)) for h in results["time"]]
-ax2.plot(t_dates, cr_vals, color="purple", linestyle=":", linewidth=1.5, alpha=0.6, label="Creatinine")
-
-# Always plot the first creatinine point
-ax2.scatter(cr1_time, cr1, color="purple", marker="x", s=60, label="Cr Point 1")
-
-# Only plot the second point if the user is actually in "Two-Point" mode
-if cr_mode == "Two-Point Linear Trend" and cr2_time is not None:
-    ax2.scatter(cr2_time, cr2, color="purple", marker="x", s=60, label="Cr Point 2")
-
-ax2.set_ylabel("Creatinine (µmol/L)", color="purple", fontweight='bold')
-ax2.tick_params(axis='y', labelcolor="purple")
-ax2.set_ylim(min(cr_vals)*0.8, max(cr_vals)*1.2)
-
-ax1.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-ax1.grid(alpha=0.2)
-h1, l1 = ax1.get_legend_handles_labels()
-h2, l2 = ax2.get_legend_handles_labels()
-ax1.legend(h1+h2, l1+l2, loc='upper left', frameon=True, framealpha=0.5)
+# 2. Call the modularized plotting function
+fig = plot_vanco_simulation(
+    sim_start=sim_start,
+    results=results,
+    cr_func=cr_func,
+    levels=levels,
+    level_times=level_times,
+    try_results=try_results if show_try_regimen else None,
+    ci_bounds=ci_bounds
+)
 
 st.pyplot(fig)
 
