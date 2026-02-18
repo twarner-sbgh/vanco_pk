@@ -48,7 +48,9 @@ class VancoPK:
         # CHANGE: Increase multiplier from 10 to 12 for 5-minute steps
         t_grid = np.linspace(0, t_max, int(t_max * 12) + 1)
         dt = t_grid[1] - t_grid[0] # This will now be 0.0833 (5 mins) instead of 0.1
-        
+        # Calculate how many indices represent 24 hours
+        steps_per_24h = int(24 / dt)    
+
         pop_ke_traj = np.full_like(t_grid, self.ke)
         if cr_func and patient_info and sim_start:
             for i, t_h in enumerate(t_grid):
@@ -57,8 +59,8 @@ class VancoPK:
                     patient_info['weight'], patient_info['height'], 
                     cr_func, sim_start + timedelta(hours=t_h)
                 )
-        
-        # UPDATED: Update self.ke to the LATEST population value so metrics/suggestions are current
+
+        # Update self.ke to the LATEST population value so metrics/suggestions are current
         self.ke = pop_ke_traj[-1] 
 
         conc = np.zeros_like(t_grid)
@@ -77,10 +79,11 @@ class VancoPK:
         return {
             "time": t_grid,
             "conc": conc,
-            "ke": self.ke * self.ke_multiplier,
+            "ke": pop_ke_traj[-1] * self.ke_multiplier,
             "vd": self.vd,
-            "half_life": LN2 / (self.ke * self.ke_multiplier),
-            "auc24": (conc[-240:].sum() * dt) if len(conc) >= 240 else 0
+            "half_life": LN2 / (pop_ke_traj[-1] * self.ke_multiplier),
+            # Use the dynamic index for calculation
+            "auc24": (conc[-steps_per_24h:].sum() * dt) if len(conc) >= steps_per_24h else 0
         }
 
     def simulate_regimen(self, dose_mg, interval_h, start_dt, end_dt, cr_func, patient_info):
