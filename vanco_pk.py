@@ -45,8 +45,9 @@ class VancoPK:
 
     def run(self, doses, duration_days=7, sim_start=None, cr_func=None, patient_info=None):
         t_max = duration_days * 24
-        t_grid = np.linspace(0, t_max, int(t_max * 10) + 1)
-        dt = t_grid[1] - t_grid[0]
+        # CHANGE: Increase multiplier from 10 to 12 for 5-minute steps
+        t_grid = np.linspace(0, t_max, int(t_max * 12) + 1)
+        dt = t_grid[1] - t_grid[0] # This will now be 0.0833 (5 mins) instead of 0.1
         
         pop_ke_traj = np.full_like(t_grid, self.ke)
         if cr_func and patient_info and sim_start:
@@ -66,7 +67,8 @@ class VancoPK:
             active_ke = pop_ke_traj[i] * self.ke_multiplier
             rate_in = 0.0
             for t_d, amt in doses:
-                if t_d <= t_h <= (t_d + amt/INFUSION_RATE):
+                # IMPORTANT: Use a small epsilon (1e-9) to avoid floating point misses
+                if t_d <= t_h <= (t_d + amt/INFUSION_RATE + 1e-9):
                     rate_in = INFUSION_RATE / self.vd
                     break
             curr_c += (rate_in - active_ke * curr_c) * dt
@@ -106,7 +108,6 @@ class VancoPK:
             )
 
     def _run_fast(self, doses, t_grid, ke_traj, multiplier):
-        """Internal helper for the fitting loop."""
         dt = t_grid[1] - t_grid[0]
         conc = np.zeros_like(t_grid)
         curr_c = 0.0
@@ -114,7 +115,8 @@ class VancoPK:
             active_ke = ke_traj[i] * multiplier
             rate_in = 0.0
             for t_d, amt in doses:
-                if t_d <= t_h <= (t_d + amt/INFUSION_RATE):
+                # Standardizing the check for 5-minute precision
+                if t_d <= t_h <= (t_d + amt/INFUSION_RATE + 1e-9):
                     rate_in = INFUSION_RATE / self.vd
                     break
             curr_c += (rate_in - active_ke * curr_c) * dt
@@ -129,7 +131,7 @@ class VancoPK:
             obs = np.array(obs)
 
             t_max = duration_days * 24 # Dynamic window
-            t_grid = np.linspace(0, t_max, int(t_max * 10) + 1)
+            t_grid = np.linspace(0, t_max, int(t_max * 12) + 1)
             
             # Pre-calculate once
             pop_ke_traj = np.array([
