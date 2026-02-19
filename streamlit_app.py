@@ -26,33 +26,62 @@ weight = st.slider("Weight (kg)", 30.0, 200.0, 75.0, 0.5)
 height = st.slider("Height (cm)", 140.0, 230.0, 175.0, 0.5)
 
 # ---------------------------
-# Creatinine
+# Creatinine History & Modeling
 # ---------------------------
 st.header("Creatinine")
 
-cr1 = st.slider("Initial Creatinine (µmol/L)", 35, 500, 100)
-cr1_time = st.datetime_input("Initial Creatinine time", datetime.now() - timedelta(days=1))
+# 1. Initialize session state using the list-based approach
+if 'cr_entries' not in st.session_state:
+    # Default to one entry from 24 hours ago
+    st.session_state.cr_entries = [{'val': 100.0, 'time': datetime.now() - timedelta(days=1)}]
 
-# Initialize variables to prevent NameErrors
-cr2 = None
-cr2_time = None
-multiplier = 1.0
-use_cr_traj = False
+# 2. UI to display and manage entries
+st.subheader("Measured Levels")
+for i, entry in enumerate(st.session_state.cr_entries):
+    cols = st.columns([2, 2, 0.5])
+    with cols[0]:
+        # Update values directly in session state
+        entry['val'] = st.number_input(f"Cr {i+1} (µmol/L)", value=entry['val'], key=f"cr_val_input_{i}")
+    with cols[1]:
+        # datetime_input is essential for PK accuracy
+        entry['time'] = st.datetime_input(f"Time {i+1}", value=entry['time'], key=f"cr_time_input_{i}")
+    with cols[2]:
+        # Allow deletion of specific rows
+        st.write("##") # Visual alignment for the button
+        if st.button("🗑️", key=f"del_btn_{i}"):
+            if len(st.session_state.cr_entries) > 1:
+                st.session_state.cr_entries.pop(i)
+                st.rerun()
 
-cr_mode = st.radio(
-    "Creatinine Simulation Type",
-    ["Constant (Single Value)", "Two-Point Linear Trend", "Predicted Multiplier Trajectory"]
-)
+if st.button("➕ Add Measured Creatinine"):
+    # Append a new default entry based on the last entry's value
+    last_val = st.session_state.cr_entries[-1]['val']
+    st.session_state.cr_entries.append({'val': last_val, 'time': datetime.now()})
+    st.rerun()
 
-if cr_mode == "Two-Point Linear Trend":
-    cr2 = st.slider("Second Creatinine (µmol/L)", 35, 500, 100)
-    cr2_time = st.datetime_input("Second Creatinine time", datetime.now())
-elif cr_mode == "Predicted Multiplier Trajectory":
-    use_cr_traj = True
-    multiplier = st.selectbox("Predicted change", [3, 2, 1.5, 1, 0.75, 0.5, 0.25], index=3)
+# 3. Overrides and Projections
+st.divider()
+st.subheader("Scenario Modeling")
+col_a, col_b = st.columns(2)
 
+with col_a:
+    use_mod = st.toggle("Override with 'Modified' Creatinine", help="Ignores history and uses a single adjusted value.")
+    # Uses 0.1x increments from 0.5x to 4x as requested
+    mod_factor = st.slider("Multiplier Factor", 0.5, 4.0, 1.0, step=0.1, disabled=not use_mod)
+
+with col_b:
+    use_future = st.toggle("Project Future Trend", help="Extrapolates from the last measurement to a predicted future value.")
+    future_val = st.number_input("Future Estimated Cr", value=100.0, disabled=not use_future)
+
+# 4. Final Logic Assembly
+# Format data for the build_creatinine_function
+cr_data = [(e['time'], e['val']) for e in st.session_state.cr_entries]
+
+# Call your updated backend function
 cr_func = build_creatinine_function(
-    cr1, cr1_time, cr2, cr2_time, use_cr_traj, multiplier
+    cr_data=cr_data, 
+    future_cr=future_val if use_future else None, 
+    modified_factor=mod_factor if use_mod else 1.0
 )
 
 # ---------------------------

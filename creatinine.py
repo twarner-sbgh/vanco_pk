@@ -1,77 +1,43 @@
 import numpy as np
 from datetime import timedelta
+from scipy.interpolate import interp1d
 
-
-def build_creatinine_function(
-    cr1,
-    t1,
-    cr2=None,
-    t2=None,
-    use_multiplier=False,
-    multiplier=1.0,
-):
+def build_creatinine_function(cr_data, future_cr=None, modified_factor=1.0):
     """
-    Returns a function cr_func(t: datetime) -> creatinine (µmol/L)
-
-    Rules:
-    - If only cr1 is provided: constant creatinine
-    - If cr1 + cr2 provided: linear trend between them, then slope-preserving
-      asymptotic leveling after 4 days from t2
-    - If use_multiplier=True (and no cr2): crude ~4-day trajectory using multiplier
+    cr_data: List of tuples [(datetime, value), ...]
+    future_cr: Optional float for a future estimate
+    modified_factor: Multiplier for the first measured value (if requested)
     """
+    # Sort data by time
+    cr_data = sorted(cr_data, key=lambda x: x[0])
+    
+    # Case: User requested a "Modified" creatinine using the slider
+    if modified_factor != 1.0:
+        base_cr = cr_data[0][1]
+        mod_cr = base_cr * modified_factor
+        return lambda t: float(mod_cr)
 
-    # -------------------------
-    # Case 1: single creatinine
-    # -------------------------
-    if cr2 is None and not use_multiplier:
-        def cr_func(t):
-            return float(cr1)
-        return cr_func
-
-    # -------------------------
-    # Case 2: Crude multiplier trajectory (Asymptotic)
-    # -------------------------
-    if cr2 is None and use_multiplier:
-        cr_target = cr1 * multiplier
-        # k=0.03 provides a curve that is ~95% complete at 4 days (96 hours)
-        k_decay = 0.03 
-
-        def cr_func(t):
-            dt_hours = (t - t1).total_seconds() / 3600
-            if dt_hours <= 0:
-                return float(cr1)
-            # Asymptotic approach formula
-            return cr_target + (cr1 - cr_target) * np.exp(-k_decay * dt_hours)
-
-        return cr_func
-
-    # -------------------------
-    # Case 3: two creatinine values
-    # -------------------------
-
-    # Convert times to days
-    total_days = (t2 - t1).total_seconds() / 86400
-    if total_days <= 0:
-        raise ValueError("Second creatinine must be after first")
-
-    slope = (cr2 - cr1) / total_days  # µmol/L per day
-
-    # Choose k so slope ~0 after ~4 days
-    k = 1.5 / 4.0  # per day
+    # Case: Multiple values or Future Estimate
+    times = [d[0] for d in cr_data]
+    values = [d[1] for d in cr_data]
+    
+    # If a future estimate is provided, anchor it at +48h from last measured
+    if future_cr is not None:
+        times.append(times[-1] + timedelta(hours=48))
+        values.append(future_cr)
 
     def cr_func(t):
-        dt_days = (t - t1).total_seconds() / 86400
-
-        # Before first value
-        if dt_days <= 0:
-            return cr1
-
-        # Between values → linear
-        if t <= t2:
-            return cr1 + slope * dt_days
-
-        # After second value → slope-preserving taper
-        dt2 = (t - t2).total_seconds() / 86400
-        return cr2 + (slope / k) * (1 - np.exp(-k * dt2))
+        # Before first measurement
+        if t <= times[0]:
+            return float(values[0])
+        # After last measurement (carry forward)
+        if t >= times[-1]:
+            return float(values[-1])
+        
+        # Interpolate between values
+        # Convert times to floats for interpolation
+        t_floats = [x.timestamp() for x in times]
+        f = interp1d(t_floats, values, kind='linear')
+        return float(f(t.timestamp()))
 
     return cr_func
