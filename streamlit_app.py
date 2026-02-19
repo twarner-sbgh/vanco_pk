@@ -28,56 +28,66 @@ height = st.slider("Height (cm)", 140.0, 230.0, 175.0, 0.5)
 # ---------------------------
 # Creatinine History & Modeling
 # ---------------------------
-st.header("Creatinine")
+st.header("Plasma Creatinine")
 
-# 1. Initialize session state using the list-based approach
+# 1. Initialize session state
 if 'cr_entries' not in st.session_state:
-    # Default to one entry from 24 hours ago
-    st.session_state.cr_entries = [{'val': 100.0, 'time': datetime.now() - timedelta(days=1)}]
+    st.session_state.cr_entries = [{'val': 100, 'time': datetime.now() - timedelta(days=1)}]
 
-# 2. UI to display and manage entries
+# 2. UI with Sliders for multi-point entry
 st.subheader("Measured Levels")
 for i, entry in enumerate(st.session_state.cr_entries):
-    cols = st.columns([2, 2, 0.5])
+    cols = st.columns([3, 2, 0.5])
     with cols[0]:
-        # Update values directly in session state
-        entry['val'] = st.number_input(f"Cr {i+1} (µmol/L)", value=entry['val'], key=f"cr_val_input_{i}")
+        # Using slider for whole numbers (integers)
+        # Range set 35-500 as per your previous version
+        entry['val'] = st.slider(
+            f"PCr {i+1} (µmol/L)", 
+            min_value=35, 
+            max_value=500, 
+            value=int(entry['val']), 
+            step=1, 
+            key=f"cr_slider_input_{i}"
+        )
     with cols[1]:
-        # datetime_input is essential for PK accuracy
         entry['time'] = st.datetime_input(f"Time {i+1}", value=entry['time'], key=f"cr_time_input_{i}")
     with cols[2]:
-        # Allow deletion of specific rows
-        st.write("##") # Visual alignment for the button
+        st.write("##") 
         if st.button("🗑️", key=f"del_btn_{i}"):
             if len(st.session_state.cr_entries) > 1:
                 st.session_state.cr_entries.pop(i)
                 st.rerun()
 
 if st.button("➕ Add Measured Creatinine"):
-    # Append a new default entry based on the last entry's value
     last_val = st.session_state.cr_entries[-1]['val']
     st.session_state.cr_entries.append({'val': last_val, 'time': datetime.now()})
     st.rerun()
 
-# 3. Overrides and Projections
+# 3. Scenario Modeling
 st.divider()
 st.subheader("Scenario Modeling")
 col_a, col_b = st.columns(2)
 
 with col_a:
-    use_mod = st.toggle("Override with 'Modified' Creatinine", help="Ignores history and uses a single adjusted value.")
-    # Uses 0.1x increments from 0.5x to 4x as requested
+    use_mod = st.toggle("Override with 'Modified' Creatinine")
+    # Slider for multiplier from 0.5x to 4x with 0.1x increments
     mod_factor = st.slider("Multiplier Factor", 0.5, 4.0, 1.0, step=0.1, disabled=not use_mod)
 
 with col_b:
-    use_future = st.toggle("Project Future Trend", help="Extrapolates from the last measurement to a predicted future value.")
-    future_val = st.number_input("Future Estimated Cr", value=100.0, disabled=not use_future)
+    use_future = st.toggle("Project Future Trend")
+    # Future estimation remains a slider for consistency
+    future_val = st.slider(
+        "Future Estimated Cr", 
+        min_value=35, 
+        max_value=500, 
+        value=100, 
+        step=1, 
+        disabled=not use_future
+    )
 
 # 4. Final Logic Assembly
-# Format data for the build_creatinine_function
 cr_data = [(e['time'], e['val']) for e in st.session_state.cr_entries]
 
-# Call your updated backend function
 cr_func = build_creatinine_function(
     cr_data=cr_data, 
     future_cr=future_val if use_future else None, 
@@ -87,7 +97,7 @@ cr_func = build_creatinine_function(
 # ---------------------------
 # Simulation settings
 # ---------------------------
-st.header("Simulation Start & Duration")
+st.header("PK Simulation Start & Duration")
 sim_start_date = st.date_input(
     "Simulation Start Date",
     datetime.now().date() - timedelta(days=1)
