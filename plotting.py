@@ -1,140 +1,131 @@
-import plotly.graph_objects as go
 from datetime import timedelta
+import plotly.graph_objects as go
 
-def plot_vanco_simulation(
-    sim_start, 
-    results, 
-    cr_func, 
-    levels=None, 
-    level_times=None, 
-    try_results=None,
-    ci_bounds=None
-):
+def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=None, try_results=None, ci_bounds=None):
     """
-    Plotly-based Vancomycin PK simulation plot.
-    Enhanced for interactive teaching with fixed white background, 
-    visible legend in dark mode, and labeled measured levels.
+    Plots Vancomycin simulation with separate colors for Cr and kGFR.
+    Legend is placed inside the top-left corner of the plot area.
     """
-
-    # Convert simulation time to datetimes
-    t_dates = [sim_start + timedelta(hours=h) for h in results["time"]]
-    cr_vals = [cr_func(sim_start + timedelta(hours=h)) for h in results["time"]]
+    # Primary time grid for the main simulation and Cr/kGFR lines
+    t_dates_main = [sim_start + timedelta(hours=h) for h in results["time"]]
+    
+    # Get dual data from cr_func (Expected return: (Cr, kGFR))
+    cr_plot_data = [cr_func(d) for d in t_dates_main]
+    cr_vals = [d[0] for d in cr_plot_data]
+    kgfr_vals = [d[1] for d in cr_plot_data]
 
     fig = go.Figure()
 
-    # 1. Confidence Interval Shading (Plotted first so it's in the background)
+    # 1. Confidence Interval (IQR Shadow)
     if ci_bounds:
         res_lo, res_hi = ci_bounds
-        # Upper anchor (invisible)
+        t_dates_ci = [sim_start + timedelta(hours=h) for h in res_lo["time"]]
         fig.add_trace(go.Scatter(
-            x=t_dates, y=res_hi["conc"], mode="lines", line=dict(width=0),
-            showlegend=False, legendgroup="ci", hoverinfo="skip"
-        ))
-        # Lower bound + Fill
-        fig.add_trace(go.Scatter(
-            x=t_dates, y=res_lo["conc"], mode="lines", fill="tonexty",
-            fillcolor="rgba(0, 0, 255, 0.15)", line=dict(width=0),
-            name="50% CI (Fitted)", legendgroup="ci",
-            text=res_hi["conc"],
-            hovertemplate="<b>CI Range</b>: %{y:.1f} - %{text:.1f} mg/L<extra></extra>"
+            x=t_dates_ci + t_dates_ci[::-1],
+            y=list(res_hi["conc"]) + list(res_lo["conc"])[::-1],
+            fill='toself',
+            fillcolor='rgba(0, 0, 255, 0.1)',
+            line=dict(color='rgba(255,255,255,0)'),
+            name='Confidence Interval',
+            showlegend=True
         ))
 
-    # 2. Main Vancomycin Curve
+    # 2. Vanco Concentration Line (Main)
     fig.add_trace(go.Scatter(
-        x=t_dates, y=results["conc"], mode="lines",
-        name="Vanco (Entered)", line=dict(color="blue", width=3),
-        hovertemplate="Time: %{x}<br>Vanco: %{y:.2f} mg/L<extra></extra>"
+        x=t_dates_main, 
+        y=results["conc"], 
+        name="Vanco (Current)", 
+        line=dict(color="blue", width=3)
     ))
 
-    # 3. "Try" Regimen Curve
-    if try_results:
-        try_dates = [sim_start + timedelta(hours=h) for h in try_results["time"]]
+    # 3. Measured Levels (High-contrast markers)
+    if levels is not None and len(levels) > 0:
         fig.add_trace(go.Scatter(
-            x=try_dates, y=try_results["conc"], mode="lines",
-            name="Try Regimen", line=dict(color="green", width=2, dash="dash"),
-            hovertemplate="Time: %{x}<br>Try Conc: %{y:.2f} mg/L<extra></extra>"
+            x=level_times, 
+            y=levels, 
+            mode="markers", 
+            name="Measured Levels", 
+            marker=dict(
+                color="red", 
+                size=12, 
+                symbol="diamond",
+                line=dict(width=2, color="black")
+            )
         ))
 
-    # 4. Measured Levels (WITH LABELS)
-    if levels and level_times:
-        # Create labels: "Value @ Time"
-        level_labels = [f"<b>{val}</b><br>{t.strftime('%H:%M')}" for val, t in zip(levels, level_times)]
-        
+    # 4. Try Regimen Comparison
+    if try_results is not None:
+        t_dates_try = [sim_start + timedelta(hours=h) for h in try_results["time"]]
         fig.add_trace(go.Scatter(
-            x=level_times,
-            y=levels,
-            mode="markers+text",  # Added +text
-            name="Measured Level",
-            marker=dict(color="#ff5733", size=12, line=dict(color="white", width=2)),
-            text=level_labels,    # Data labels
-            textposition="top center",
-            textfont=dict(color="black", size=11),
-            hovertemplate="Measured Level<br>Time: %{x}<br>Value: %{y} mg/L<extra></extra>"
+            x=t_dates_try, 
+            y=try_results["conc"], 
+            name="Vanco ('Try' Regimen))", 
+            line=dict(color="green", width=2, dash="dash")
         ))
 
-    # 5. Creatinine Trend (Secondary Axis)
+    # 5. Creatinine (Right Axis - Orchid)
     fig.add_trace(go.Scatter(
-        x=t_dates, y=cr_vals, mode="lines",
-        name="Creatinine", line=dict(color="purple", width=1.5, dash="dot"),
-        yaxis="y2", hovertemplate="Time: %{x}<br>Cr: %{y:.1f} µmol/L<extra></extra>"
+        x=t_dates_main, 
+        y=cr_vals, 
+        name="Creatinine", 
+        line=dict(color="orchid", width=1.5, dash="dot"), 
+        yaxis="y2"
     ))
 
-    # 6. Layout Fixes (White BG, Visible Legend, Properly Scaled Axes)
+    # 6. Kinetic GFR (Right Axis - Indigo)
+    if any(k is not None for k in kgfr_vals):
+        fig.add_trace(go.Scatter(
+            x=t_dates_main, 
+            y=kgfr_vals, 
+            name="Kinetic GFR", 
+            line=dict(color="indigo", width=2, dash="dash"), 
+            yaxis="y2"
+        ))
+
+    # --- STYLE & LEGEND ---
     fig.update_layout(
-        height=500,
-        paper_bgcolor="white",
-        plot_bgcolor="white",
-        hovermode="x unified",
-        # FIX: Explicitly set legend font color for Dark Mode compatibility
-        legend=dict(
-            orientation="h", yanchor="bottom", y=1.05, xanchor="left", x=0,
-            font=dict(color="black"),
-            bgcolor="rgba(255, 255, 255, 0.6)"
-        ),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
         xaxis=dict(
-            title=dict(text="Date", font=dict(color="black")),
-            tickfont=dict(color="black"),
-            gridcolor="lightgrey",
-            linecolor="black",
-            range=[t_dates[0], t_dates[-1]], # Limit start to T=0
-            rangemode="nonnegative"
+            title="Date/Time",
+            showline=True, 
+            linecolor='black', 
+            gridcolor='lightgrey',
+            showgrid=True
         ),
         yaxis=dict(
-            title=dict(text="Vancomycin (mg/L)", font=dict(color="blue")),
+            title=dict(text="Vanco (mg/L)", font=dict(color="blue")),
             tickfont=dict(color="blue"),
-            gridcolor="lightgrey",
-            linecolor="blue",
-            rangemode="nonnegative",
-            range=[0, max(results["conc"] + (levels or [0])) * 1.1] # Buffer for labels
+            showline=True, 
+            linecolor='black',
+            gridcolor='lightgrey',
+            showgrid=True,
+            zeroline=True,
+            zerolinecolor='lightgrey'
         ),
         yaxis2=dict(
-            title=dict(text="Creatinine (µmol/L)", font=dict(color="purple")),
-            tickfont=dict(color="purple"),
-            overlaying="y", side="right",
-            showgrid=False,
-            linecolor="purple",
-            range=[min(cr_vals)*0.8, max(cr_vals)*1.2] if cr_vals else None
+            title=dict(text="Cr (µmol/L) / kGFR (mL/min)", font=dict(color="indigo")),
+            tickfont=dict(color="indigo"),
+            overlaying="y",
+            side="right",
+            showline=True, 
+            linecolor='black',
+            showgrid=False, # Keeps grid tied only to Vanco scale
+            rangemode='tozero'
         ),
-        margin=dict(l=50, r=50, t=80, b=50)
+        # Legend positioned inside the plot area at the top-left
+        legend=dict(
+            orientation="v", 
+            yanchor="top",
+            y=0.99, 
+            xanchor="left",
+            x=0.01,
+            font=dict(color="black", size=11),
+            bgcolor="rgba(255, 255, 255, 0.8)", # Slightly more opaque for readability
+            bordercolor="black",
+            borderwidth=1
+        ),
+        margin=dict(l=50, r=50, t=50, b=50) # Standard margins
     )
-
-# 7. Add subtle vertical lines to divide the days
-    # Find the start of the simulation day
-    sim_start_day = sim_start.replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # Calculate midnight for each day in the simulation range
-    current_divider = sim_start_day + timedelta(days=1)
-    last_date = t_dates[-1]
-    
-    while current_divider <= last_date:
-        fig.add_vline(
-            # FIX: Pass as string (ISO format) to avoid UTC offset issues in Plotly
-            x=current_divider.strftime("%Y-%m-%d %H:%M:%S"),
-            line_width=1,
-            line_dash="dash",
-            line_color="rgba(180, 180, 180, 0.3)", # Very subtle
-            layer="below"
-        )
-        current_divider += timedelta(days=1)
-
     return fig

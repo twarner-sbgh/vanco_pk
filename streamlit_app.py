@@ -16,6 +16,18 @@ st.set_page_config(layout="centered")
 st.title("Vancomycin PK Simulator")
 
 # ---------------------------
+# Simulation settings
+# ---------------------------
+sim_start_date = st.date_input(
+    "Simulation Start Date",
+    datetime.now().date() - timedelta(days=1)
+)
+sim_start = datetime.combine(sim_start_date, datetime.min.time())
+
+duration_days = st.slider("Simulation Duration (Days)", 1, 14, 7)
+sim_end = sim_start + timedelta(days=duration_days)
+
+# ---------------------------
 # Patient inputs
 # ---------------------------
 st.header("Patient")
@@ -35,12 +47,12 @@ if 'cr_entries' not in st.session_state:
     st.session_state.cr_entries = [{'val': 100, 'time': datetime.now() - timedelta(days=1)}]
 
 # 2. UI with Sliders for multi-point entry
-st.subheader("Measured Levels")
+st.subheader("Measured PCr")
 for i, entry in enumerate(st.session_state.cr_entries):
-    cols = st.columns([3, 2, 0.5])
+    cols = st.columns([3, 2, 2, 0.5]) # Added an extra column for the split date/time
+    
     with cols[0]:
-        # Using slider for whole numbers (integers)
-        # Range set 35-500 as per your previous version
+        # Numeric slider for Plasma Creatinine
         entry['val'] = st.slider(
             f"PCr {i+1} (µmol/L)", 
             min_value=35, 
@@ -49,23 +61,41 @@ for i, entry in enumerate(st.session_state.cr_entries):
             step=1, 
             key=f"cr_slider_input_{i}"
         )
+        
     with cols[1]:
-        entry['time'] = st.datetime_input(f"Time {i+1}", value=entry['time'], key=f"cr_time_input_{i}")
+        # Date Input
+        d = st.date_input(
+            f"Date {i+1}", 
+            value=entry['time'].date(), 
+            key=f"cr_date_{i}"
+        )
+        
     with cols[2]:
-        st.write("##") 
+        # Time Input
+        t = st.time_input(
+            f"Time {i+1}", 
+            value=entry['time'].time(), 
+            key=f"cr_time_{i}"
+        )
+        # Re-combine into the datetime object stored in session state
+        entry['time'] = datetime.combine(d, t)
+        
+    with cols[3]:
+        # Delete Button
+        st.write("##") # Vertical alignment spacer
         if st.button("🗑️", key=f"del_btn_{i}"):
             if len(st.session_state.cr_entries) > 1:
                 st.session_state.cr_entries.pop(i)
                 st.rerun()
 
-if st.button("➕ Add Measured Creatinine"):
+if st.button("➕ Add Measured PCr"):
     last_val = st.session_state.cr_entries[-1]['val']
     st.session_state.cr_entries.append({'val': last_val, 'time': datetime.now()})
     st.rerun()
 
 # 3. Scenario Modeling
 st.divider()
-st.subheader("Scenario Modeling")
+st.subheader("Creatinine Modeling")
 col_a, col_b = st.columns(2)
 
 with col_a:
@@ -95,25 +125,6 @@ cr_func = build_creatinine_function(
 )
 
 # ---------------------------
-# Simulation settings
-# ---------------------------
-st.header("PK Simulation Start & Duration")
-sim_start_date = st.date_input(
-    "Simulation Start Date",
-    datetime.now().date() - timedelta(days=1)
-)
-sim_start = datetime.combine(sim_start_date, datetime.min.time())
-
-sim_duration_days = st.number_input(
-    "Simulation duration (days)",
-    min_value=1,
-    max_value=30,
-    value=7,
-    step=1,
-)
-sim_end = sim_start + timedelta(days=sim_duration_days)
-
-# ---------------------------
 # Dose List Construction
 # ---------------------------
 manual_dose_inputs = []
@@ -123,7 +134,13 @@ st.header("Manual Doses")
 for i in range(5):
     if st.checkbox(f"Enable manual dose {i+1}", key=f"md_on_{i}"):
         dose = st.selectbox("Dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=3, key=f"md_dose_{i}")
-        time = st.datetime_input("Time", sim_start + timedelta(hours=9, minutes=30), key=f"md_time_{i}")
+        
+        # Fix for datetime input
+        col1, col2 = st.columns(2)
+        d_md = col1.date_input("Date", sim_start.date(), key=f"md_date_{i}")
+        t_md = col2.time_input("Time", (sim_start + timedelta(hours=9, minutes=30)).time(), key=f"md_time_{i}")
+        time = datetime.combine(d_md, t_md)
+        
         manual_dose_inputs.append(dose)
         manual_time_inputs.append(time)
 
@@ -134,10 +151,12 @@ ordered_dose, ordered_interval, ordered_start = None, None, None
 if show_ordered_dose:
     ordered_dose = st.selectbox("Ordered dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=3)
     ordered_interval = st.selectbox("Interval (h)", [6, 8, 12, 18, 24, 36, 48, 72], index=2)
-    ordered_start = st.datetime_input("Ordered dose start time", sim_start + timedelta(days=1, hours=9, minutes=30))
-    if ordered_start < sim_start:
-        st.error("Ordered dose start must be on or after simulation start.")
-        st.stop()
+    
+    # Fix for datetime input
+    col1, col2 = st.columns(2)
+    d_ord = col1.date_input("Ordered Start Date", (sim_start + timedelta(days=1)).date())
+    t_ord = col2.time_input("Ordered Start Time", (sim_start + timedelta(hours=9, minutes=30)).time())
+    ordered_start = datetime.combine(d_ord, t_ord)
 
 doses = build_manual_doses(manual_dose_inputs, manual_time_inputs, sim_start)
 if show_ordered_dose and ordered_dose:
@@ -151,7 +170,13 @@ levels, level_times = [], []
 for i in range(5):
     if st.checkbox(f"Enable level {i+1}", key=f"lvl_on_{i}"):
         lvl = st.number_input("Level (mg/L)", 0.0, 100.0, 15.0, step=0.1, key=f"lvl_val_{i}")
-        t = st.datetime_input("Time", sim_start + timedelta(hours=9), key=f"lvl_time_{i}")
+        
+        # Fix for datetime input
+        col1, col2 = st.columns(2)
+        d_lvl = col1.date_input("Date", sim_start.date(), key=f"lvl_date_{i}")
+        t_lvl = col2.time_input("Time", (sim_start + timedelta(hours=9)).time(), key=f"lvl_time_{i}")
+        t = datetime.combine(d_lvl, t_lvl)
+        
         levels.append(lvl)
         level_times.append(t)
 
@@ -167,8 +192,22 @@ p_info = {
     'height': height
 }
 
-ke_pop, vd = pk_params_from_patient(age, sex, weight, height, cr_func, sim_start)
-pk = VancoPK(ke_pop, vd)
+
+
+# Parameters for PK model are now returned as a dictionary
+params = pk_params_from_patient(age, sex, weight, height, cr_func, sim_start)
+ke_pop = params['ke']
+vd_pop = params['vd']
+
+cr_func = build_creatinine_function(
+    cr_data=cr_data, 
+    future_cr=future_val if use_future else None, 
+    modified_factor=mod_factor if use_mod else 1.0,
+    patient_params=p_info
+)
+
+# Initialize the PK engine
+pk = VancoPK(ke_pop, vd_pop)
 
 if len(levels) >= 1:
     pk.fit_ke_from_levels(doses, level_times, levels, sim_start, cr_func=cr_func, patient_info=p_info)
@@ -176,20 +215,21 @@ if len(levels) >= 1:
 else:
     st.warning("Using population PK estimates.")
 
-# Run simulation
+# Run the simulation
 results = pk.run(
-    doses, 
-    duration_days=sim_duration_days, 
-    sim_start=sim_start, 
-    cr_func=cr_func, 
-    patient_info=p_info
+    doses=doses,
+    duration_days=duration_days,
+    sim_start=sim_start,
+    cr_func=cr_func,
+    patient_info=p_info 
 )
 
 # ---------------------------
 # Suggested Regimen
 # ---------------------------
 st.header("Try Regimen / Suggested Regimen")
-suggested_dose, suggested_interval, predicted_auc = suggest_regimen(pk, target_auc=500)
+# Pass the p_info dictionary we created earlier to the suggester
+suggested_dose, suggested_interval, predicted_auc = suggest_regimen(pk, target_auc=500, patient_info=p_info)
 st.markdown(f"**Suggested: {suggested_dose} mg q{suggested_interval}h** (AUC24 ≈ {predicted_auc:.0f})")
 
 show_try_regimen = st.checkbox("Show try/suggested regimen on graph", value=False)
@@ -203,7 +243,7 @@ try_results = None
 
 if show_try_regimen:
     # end_dt is usually the start + the simulation duration
-    sim_end = sim_start + timedelta(days=sim_duration_days)
+    sim_end = sim_start + timedelta(days=duration_days)
     
     try_results = pk.simulate_regimen(
         dose_mg=try_dose, 
@@ -214,6 +254,12 @@ if show_try_regimen:
         patient_info=p_info
     )
 
+# Temporary debug check
+if len(results["conc"]) > 0:
+    st.write(f"DEBUG: Max Concentration is {max(results['conc']):.2f}")
+else:
+    st.error("DEBUG: results['conc'] is empty!")
+    
 # ---------------------------
 # Plotting (Dual Axis)
 # ---------------------------
@@ -227,10 +273,10 @@ if len(levels) >= 1:
     
     # Simulate bounds for shading
     pk.ke_multiplier = mult_hi 
-    res_lo = pk.run(doses, duration_days=sim_duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info)
+    res_hi = pk.run(doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info)
     
     pk.ke_multiplier = mult_lo
-    res_hi = pk.run(doses, duration_days=sim_duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info)
+    res_lo = pk.run(doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info)
     
     pk.ke_multiplier = current_fitted_mult
     ci_bounds = (res_lo, res_hi)
