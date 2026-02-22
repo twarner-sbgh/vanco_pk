@@ -38,18 +38,25 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
         line=dict(color="blue", width=3)
     ))
 
-    # 3. Measured Levels (High-contrast markers)
+    # 3. Measured Levels (High-contrast markers with text labels)
     if levels is not None and len(levels) > 0:
+        # Create a formatted list of strings for the label showing value and time
+        # Format: "15.0 mg/L<br>Feb 21, 14:30"
+        level_texts = [f"{lvl:.1f} mg/L<br>{t.strftime('%b %d, %H:%M')}" for lvl, t in zip(levels, level_times)]
+        
         fig.add_trace(go.Scatter(
             x=level_times, 
             y=levels, 
-            mode="markers", 
+            mode="markers+text",       # ENABLE TEXT
             name="Measured Levels", 
+            text=level_texts,          # APPLY THE FORMATTED STRINGS
+            textposition="bottom center", # PLACE IT DIRECTLY UNDER THE MARKER
+            textfont=dict(color="black", size=10), # KEEP IT READABLE BUT SMALL
             marker=dict(
                 color="red", 
-                size=12, 
+                size=8,                # CHANGED FROM 12 TO 8
                 symbol="diamond",
-                line=dict(width=2, color="black")
+                line=dict(width=1.5, color="black") # Slightly thinner outline to match the smaller size
             )
         ))
 
@@ -59,7 +66,7 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
         fig.add_trace(go.Scatter(
             x=t_dates_try, 
             y=try_results["conc"], 
-            name="Vanco ('Try' Regimen))", 
+            name="Vanco ('Try' Regimen)", 
             line=dict(color="green", width=2, dash="dash")
         ))
 
@@ -101,7 +108,8 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             gridcolor='lightgrey',
             showgrid=True,
             zeroline=True,
-            zerolinecolor='lightgrey'
+            zerolinecolor='lightgrey',
+            rangemode='tozero'         # ALIGNS THE BOTTOM TO ZERO
         ),
         yaxis2=dict(
             title=dict(text="Cr (µmol/L) / kGFR (mL/min)", font=dict(color="indigo")),
@@ -110,8 +118,8 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             side="right",
             showline=True, 
             linecolor='black',
-            showgrid=False, # Keeps grid tied only to Vanco scale
-            rangemode='tozero'
+            showgrid=False,            # Keeps grid tied only to Vanco scale
+            rangemode='tozero'         # MATCHES PRIMARY AXIS
         ),
         # Legend positioned inside the plot area at the top-left
         legend=dict(

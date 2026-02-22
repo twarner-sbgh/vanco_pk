@@ -1,0 +1,4 @@
+[theme]
+# This changes the accent color for sliders, checkboxes, buttons, etc.
+primaryColor = "#0068c9"
+base = "dark"

@@ -49,10 +49,9 @@ if 'cr_entries' not in st.session_state:
 # 2. UI with Sliders for multi-point entry
 st.subheader("Measured PCr")
 for i, entry in enumerate(st.session_state.cr_entries):
-    cols = st.columns([3, 2, 2, 0.5]) # Added an extra column for the split date/time
+    cols = st.columns([3, 2, 2, 0.5]) 
     
     with cols[0]:
-        # Numeric slider for Plasma Creatinine
         entry['val'] = st.slider(
             f"PCr {i+1} (µmol/L)", 
             min_value=35, 
@@ -63,7 +62,6 @@ for i, entry in enumerate(st.session_state.cr_entries):
         )
         
     with cols[1]:
-        # Date Input
         d = st.date_input(
             f"Date {i+1}", 
             value=entry['time'].date(), 
@@ -71,27 +69,35 @@ for i, entry in enumerate(st.session_state.cr_entries):
         )
         
     with cols[2]:
-        # Time Input
         t = st.time_input(
             f"Time {i+1}", 
             value=entry['time'].time(), 
             key=f"cr_time_{i}"
         )
-        # Re-combine into the datetime object stored in session state
         entry['time'] = datetime.combine(d, t)
         
     with cols[3]:
-        # Delete Button
-        st.write("##") # Vertical alignment spacer
-        if st.button("🗑️", key=f"del_btn_{i}"):
-            if len(st.session_state.cr_entries) > 1:
+        st.write("##")  # Alignment spacer
+        if i > 0:
+            # We use a nested column or just stack them 
+            # to keep the clickable area right under the icon
+            st.image("assets/red_x.png", width=22)
+            if st.button(" ", key=f"del_{i}", help="Remove this entry"):
                 st.session_state.cr_entries.pop(i)
                 st.rerun()
 
-if st.button("➕ Add Measured PCr"):
-    last_val = st.session_state.cr_entries[-1]['val']
-    st.session_state.cr_entries.append({'val': last_val, 'time': datetime.now()})
-    st.rerun()
+# Create two columns where the first is very narrow just for the icon
+btn_col1, btn_col2 = st.columns([0.07, 0.93])
+
+with btn_col1:
+    # Adjust width to match button height
+    st.image("assets/green_plus.png", width=28)
+
+with btn_col2:
+    if st.button("Add Measured PCr", key="add_cr"):
+        last_val = st.session_state.cr_entries[-1]['val']
+        st.session_state.cr_entries.append({'val': last_val, 'time': datetime.now()})
+        st.rerun()
 
 # 3. Scenario Modeling
 st.divider()
@@ -100,12 +106,10 @@ col_a, col_b = st.columns(2)
 
 with col_a:
     use_mod = st.toggle("Override with 'Modified' Creatinine")
-    # Slider for multiplier from 0.5x to 4x with 0.1x increments
     mod_factor = st.slider("Multiplier Factor", 0.5, 4.0, 1.0, step=0.1, disabled=not use_mod)
 
 with col_b:
     use_future = st.toggle("Project Future Trend")
-    # Future estimation remains a slider for consistency
     future_val = st.slider(
         "Future Estimated Cr", 
         min_value=35, 

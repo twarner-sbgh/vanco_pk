@@ -37,7 +37,7 @@ def pk_params_from_patient(age, sex, weight, height, cr_func, when):
         ibw = 45.5 + 0.9 * (height - 152)
 
     weight_for_vd = ibw + 0.4 * (weight - ibw) if weight > 1.25 * ibw else weight
-    vd = 0.75 * weight_for_vd
+    vd = 0.8 * weight_for_vd
 
     return {"ke": ke, "vd": vd, "crcl": crcl}
 
