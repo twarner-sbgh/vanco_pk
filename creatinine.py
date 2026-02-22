@@ -42,6 +42,7 @@ def build_creatinine_function(cr_data, future_cr=None, modified_factor=1.0, pati
     # Sort and remove duplicates to prevent interpolation errors
     cr_data = sorted(list(set(cr_data)), key=lambda x: x[0])
     
+    # Modified factor (to allow for future projections or hypothetical Cr adjustments) left here in case UI element is added back in later
     if modified_factor != 1.0:
         base_val = cr_data[0][1] * modified_factor
         return lambda t: (float(base_val), None)
@@ -49,10 +50,6 @@ def build_creatinine_function(cr_data, future_cr=None, modified_factor=1.0, pati
     times = [d[0] for d in cr_data]
     values = [d[1] for d in cr_data]
     
-    if future_cr is not None:
-        times.append(times[-1] + timedelta(hours=48))
-        values.append(future_cr)
-
     t_floats = [x.timestamp() for x in times]
     
     # If there is only 1 point, interp1d will crash, so we handle it gracefully

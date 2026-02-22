@@ -8,12 +8,13 @@ from dosing import (
     suggest_regimen
 )
 from plotting import plot_vanco_simulation
+import uuid
 
 # ---------------------------
 # Streamlit setup
 # ---------------------------
 st.set_page_config(layout="centered")
-st.title("Vancomycin PK Simulator")
+st.title("Vancomycin PK Simulator (under construction)")
 
 # ---------------------------
 # Simulation settings
@@ -44,88 +45,75 @@ st.header("Plasma Creatinine")
 
 # 1. Initialize session state
 if 'cr_entries' not in st.session_state:
-    st.session_state.cr_entries = [{'val': 100, 'time': datetime.now() - timedelta(days=1)}]
+    st.session_state.cr_entries = [{
+        'id': str(uuid.uuid4()),
+        'val': 100,
+        'time': datetime.now() - timedelta(days=1)
+    }]
+else:
+    # Backfill IDs for old entries
+    for entry in st.session_state.cr_entries:
+        if 'id' not in entry:
+            entry['id'] = str(uuid.uuid4())
 
 # 2. UI with Sliders for multi-point entry
 st.subheader("Measured PCr")
 for i, entry in enumerate(st.session_state.cr_entries):
-    cols = st.columns([3, 2, 2, 0.5]) 
-    
+    cols = st.columns([3, 2, 2, 0.6])
+
     with cols[0]:
+        st.markdown(f"**PCr {i+1} (µmol/L)**")
         entry['val'] = st.slider(
-            f"PCr {i+1} (µmol/L)", 
-            min_value=35, 
-            max_value=500, 
-            value=int(entry['val']), 
-            step=1, 
-            key=f"cr_slider_input_{i}"
+            "",
+            min_value=35,
+            max_value=500,
+            value=int(entry['val']),
+            step=1,
+            key=f"cr_slider_input_{entry['id']}",
+            label_visibility="collapsed"
         )
-        
+
     with cols[1]:
         d = st.date_input(
-            f"Date {i+1}", 
-            value=entry['time'].date(), 
-            key=f"cr_date_{i}"
+            f"Date {i+1}",
+            value=entry['time'].date(),
+            key=f"cr_date_{entry['id']}"
         )
-        
+
     with cols[2]:
         t = st.time_input(
-            f"Time {i+1}", 
-            value=entry['time'].time(), 
-            key=f"cr_time_{i}"
+            f"Time {i+1}",
+            value=entry['time'].time(),
+            key=f"cr_time_{entry['id']}"
         )
         entry['time'] = datetime.combine(d, t)
-        
+
     with cols[3]:
-        st.write("##")  # Alignment spacer
         if i > 0:
-            # We use a nested column or just stack them 
-            # to keep the clickable area right under the icon
-            st.image("assets/red_x.png", width=22)
-            if st.button(" ", key=f"del_{i}", help="Remove this entry"):
+            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+            if st.button("✖", key=f"del_{entry['id']}", help="Remove this measurement"):
                 st.session_state.cr_entries.pop(i)
                 st.rerun()
 
-# Create two columns where the first is very narrow just for the icon
-btn_col1, btn_col2 = st.columns([0.07, 0.93])
+# Using a heavy plus sign (✚) and text. 
+# It will use your Blue theme color if you click it, and look clean and native.
+if st.button("✚ Add Measured PCr", key="add_cr_btn"):
+    last_val = st.session_state.cr_entries[-1]['val']
+    st.session_state.cr_entries.append({
+        'id': str(uuid.uuid4()),
+        'val': last_val,
+        'time': datetime.now()
+    })
+    st.rerun()
 
-with btn_col1:
-    # Adjust width to match button height
-    st.image("assets/green_plus.png", width=28)
-
-with btn_col2:
-    if st.button("Add Measured PCr", key="add_cr"):
-        last_val = st.session_state.cr_entries[-1]['val']
-        st.session_state.cr_entries.append({'val': last_val, 'time': datetime.now()})
-        st.rerun()
-
-# 3. Scenario Modeling
-st.divider()
-st.subheader("Creatinine Modeling")
-col_a, col_b = st.columns(2)
-
-with col_a:
-    use_mod = st.toggle("Override with 'Modified' Creatinine")
-    mod_factor = st.slider("Multiplier Factor", 0.5, 4.0, 1.0, step=0.1, disabled=not use_mod)
-
-with col_b:
-    use_future = st.toggle("Project Future Trend")
-    future_val = st.slider(
-        "Future Estimated Cr", 
-        min_value=35, 
-        max_value=500, 
-        value=100, 
-        step=1, 
-        disabled=not use_future
-    )
-
-# 4. Final Logic Assembly
+# 3. Final Logic Assembly
 cr_data = [(e['time'], e['val']) for e in st.session_state.cr_entries]
 
+# We set future_cr to None and modified_factor to 1.0 (no change)
 cr_func = build_creatinine_function(
     cr_data=cr_data, 
-    future_cr=future_val if use_future else None, 
-    modified_factor=mod_factor if use_mod else 1.0
+    future_cr=None, 
+    modified_factor=1.0
 )
 
 # ---------------------------
@@ -134,7 +122,7 @@ cr_func = build_creatinine_function(
 manual_dose_inputs = []
 manual_time_inputs = []
 
-st.header("Manual Doses")
+st.header("Manual Vancomycin Doses")
 for i in range(5):
     if st.checkbox(f"Enable manual dose {i+1}", key=f"md_on_{i}"):
         dose = st.selectbox("Dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=3, key=f"md_dose_{i}")
@@ -148,7 +136,7 @@ for i in range(5):
         manual_dose_inputs.append(dose)
         manual_time_inputs.append(time)
 
-st.header("Ordered Regimen")
+st.header("Ordered Vancomycin Regimen")
 show_ordered_dose = st.checkbox("Display ordered regimen", value=False)
 ordered_dose, ordered_interval, ordered_start = None, None, None
 
@@ -205,9 +193,9 @@ vd_pop = params['vd']
 
 cr_func = build_creatinine_function(
     cr_data=cr_data, 
-    future_cr=future_val if use_future else None, 
-    modified_factor=mod_factor if use_mod else 1.0,
-    patient_params=p_info
+    future_cr=None,           # Removes the "Future" projection
+    modified_factor=1.0,      # Keeps measurements at 1:1 (no multiplier)
+    patient_params=p_info     # Keeps the patient demographics/context
 )
 
 # Initialize the PK engine
