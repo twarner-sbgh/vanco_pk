@@ -6,11 +6,44 @@ from datetime import datetime, timedelta # datetime used for type hinting or fut
 INFUSION_RATE = 1000.0  # mg/hour - fixed infusion rate for all doses (1g/hr)
 LN2 = np.log(2)
 
+# Steady-state concentration calculations
+def calculate_ss_conc(ke, vd, dose, interval, infusion_rate=INFUSION_RATE):
+    """Calculates steady-state peak and trough concentrations based on PK parameters."""
+    if ke <= 0 or vd <= 0 or interval <= 0:
+        return 0.0, 0.0
+    
+    t_inf = dose / infusion_rate
+    cl = ke * vd
+    
+    # SS Peak formula for intermittent infusion
+    cpk_ss = (infusion_rate / cl) * (1 - np.exp(-ke * t_inf)) / (1 - np.exp(-ke * interval))
+    
+    # SS Trough formula
+    ctr_ss = cpk_ss * np.exp(-ke * (interval - t_inf))
+    
+    return cpk_ss, ctr_ss
+
 @dataclass
 class Dose:
     time: float
     amount: float
     ke: float = None
+
+def calculate_ss_conc(ke, vd, dose, interval, infusion_rate=INFUSION_RATE):
+    """Calculates steady-state peak and trough concentrations (Intermittent Infusion)."""
+    if ke <= 0 or vd <= 0 or interval <= 0:
+        return 0.0, 0.0
+    
+    t_inf = dose / infusion_rate
+    cl = ke * vd
+    
+    # SS Peak formula: Cpk = (R/CL) * (1 - e^-kTinf) / (1 - e^-kTau)
+    cpk_ss = (infusion_rate / cl) * (1 - np.exp(-ke * t_inf)) / (1 - np.exp(-ke * interval))
+    
+    # SS Trough formula: Ctr = Cpk * e^-k(Tau - Tinf)
+    ctr_ss = cpk_ss * np.exp(-ke * (interval - t_inf))
+    
+    return cpk_ss, ctr_ss
 
 def pk_params_from_patient(age, sex, weight, height, cr_func, when):
     cr_data = cr_func(when)
@@ -72,6 +105,7 @@ class VancoPK:
             duration = amt / INFUSION_RATE
             dose_intervals.append((t_d, t_d + duration))
 
+        # Determine current baseline ke from renal function
         pop_ke_traj = np.full_like(t_grid, self.ke)
         if cr_func and patient_info and sim_start:
             for i, t_h in enumerate(t_grid):
@@ -91,6 +125,7 @@ class VancoPK:
 
         conc = np.zeros_like(t_grid)
         curr_c = 0.0
+        active_ke = self.ke # Initialize
 
         for i, t_h in enumerate(t_grid):
             current_dt = sim_start + timedelta(hours=t_h)
@@ -99,33 +134,32 @@ class VancoPK:
             # Use vd_safe to prevent division by zero in dose entry
             vd_safe = self.vd if (self.vd and self.vd > 0) else 50.0
             
-            # DETERMINING ELIMINATION (ke)
+            # DETERMINING ELIMINATION (active_ke includes the Bayesian multiplier)
             if kgfr is not None:
-                # APPLY THE MULTIPLIER HERE TOO
                 active_ke = ((kgfr * 0.06) / vd_safe) * self.ke_multiplier
             else:
                 active_ke = pop_ke_traj[i] * self.ke_multiplier
+            
+            # Ensure ke stays within physiological limits (Half-life 4h to 120h)
+            active_ke = max(min(active_ke, 0.17), 0.005)
 
 #           FIX: Ultimate safety net against NaN poisoning
             if np.isnan(active_ke):
                 active_ke = 0.05 # Fallback to a safe minimum if math fails
 
-            # Ensure ke stays within physiological limits (Half-life 4h to 120h)
-            active_ke = max(min(active_ke, 0.17), 0.005)
-
-            # Update the object's ke at each step so the final state is preserved
-            self.ke = active_ke
+            # Store the unmultiplied base ke so it can be combined with 
+            # the multiplier elsewhere without double-counting.
+            self.ke = active_ke / max(self.ke_multiplier, 0.01)
             
+            # ODE UPDATE
             # DOSE INFUSION
             rate_in = 0.0
             for t_d, amt in doses:
                 duration = amt / INFUSION_RATE
-                # Add 1e-9 buffer to the 'end time' check
                 if t_d <= t_h <= (t_d + duration + 1e-9):
                     rate_in = INFUSION_RATE / vd_safe
                     break
             
-            # ODE UPDATE
             # Change in Conc = (Rate In) - (Elimination Rate * Current Conc)
             curr_c += (rate_in - active_ke * curr_c) * dt
             conc[i] = max(curr_c, 0)

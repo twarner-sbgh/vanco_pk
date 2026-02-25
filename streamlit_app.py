@@ -1,6 +1,6 @@
 import streamlit as st
 from datetime import datetime, timedelta
-from vanco_pk import VancoPK, pk_params_from_patient
+from vanco_pk import VancoPK, pk_params_from_patient, calculate_ss_conc
 from creatinine import build_creatinine_function
 from dosing import (
     build_manual_doses,
@@ -184,8 +184,6 @@ p_info = {
     'height': height
 }
 
-
-
 # Parameters for PK model are now returned as a dictionary
 params = pk_params_from_patient(age, sex, weight, height, cr_func, sim_start)
 ke_pop = params['ke']
@@ -246,12 +244,6 @@ if show_try_regimen:
         patient_info=p_info
     )
 
-# Temporary debug check
-if len(results["conc"]) > 0:
-    st.write(f"DEBUG: Max Concentration is {max(results['conc']):.2f}")
-else:
-    st.error("DEBUG: results['conc'] is empty!")
-    
 # ---------------------------
 # Plotting (Dual Axis)
 # ---------------------------
@@ -289,13 +281,22 @@ st.plotly_chart(fig, use_container_width=True)
 # ---------------------------
 # Metrics with Color-Coding
 # ---------------------------
-def show_metrics(label, res):
+def show_metrics(label, res, dose=None, interval=None):
     st.subheader(label)
-    cols = st.columns(4)
+    cols = st.columns(6) # Increased to 6 columns
     cols[0].metric("ke (1/h)", f"{res['ke']:.3f}")
     cols[1].metric("Half-life (h)", f"{res['half_life']:.1f}")
     cols[2].metric("Vd (L)", f"{res['vd']:.1f}")
     cols[3].metric("AUC24", f"{res['auc24']:.0f}")
+    
+    if dose and interval:
+        # Use the finalized ke from the simulation results
+        cpk, ctr = calculate_ss_conc(res['ke'], res['vd'], dose, interval)
+        cols[4].metric("Cpkss (mg/L)", f"{cpk:.1f}")
+        cols[5].metric("Ctrss (mg/L)", f"{ctr:.1f}")
+    else:
+        cols[4].metric("Cpkss", "N/A")
+        cols[5].metric("Ctrss", "N/A")
 
     # Color coding logic for AUC24
     auc = res['auc24']
@@ -306,6 +307,10 @@ def show_metrics(label, res):
     else:
         st.error(f"AUC24 of {auc:.0f} is above target range (> 600).")
 
-show_metrics("Summary: Entered Regimen", results)
+show_metrics("Summary: Entered Regimen", results, 
+             dose=ordered_dose if show_ordered_dose else None, 
+             interval=ordered_interval if show_ordered_dose else None)
+
 if try_results:
-    show_metrics("Summary: Try Regimen", try_results)
+    show_metrics("Summary: Try Regimen", try_results, 
+                 dose=try_dose, interval=try_interval)
