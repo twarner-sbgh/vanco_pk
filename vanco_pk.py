@@ -6,7 +6,7 @@ from datetime import datetime, timedelta # datetime used for type hinting or fut
 INFUSION_RATE = 1000.0  # mg/hour - fixed infusion rate for all doses (1g/hr)
 LN2 = np.log(2)
 
-# Steady-state concentration calculations
+# Steady-state concentration calculations, for Cpkss & Ctrss
 def calculate_ss_conc(ke, vd, dose, interval, infusion_rate=INFUSION_RATE):
     """Calculates steady-state peak and trough concentrations based on PK parameters."""
     if ke <= 0 or vd <= 0 or interval <= 0:
@@ -127,6 +127,8 @@ class VancoPK:
         curr_c = 0.0
         active_ke = self.ke # Initialize
 
+        ke_history = []  # Track dynamic ke for averaging
+
         for i, t_h in enumerate(t_grid):
             current_dt = sim_start + timedelta(hours=t_h)
             cr_val, kgfr = cr_func(current_dt)
@@ -142,8 +144,9 @@ class VancoPK:
             
             # Ensure ke stays within physiological limits (Half-life 4h to 120h)
             active_ke = max(min(active_ke, 0.17), 0.005)
+            ke_history.append(active_ke) 
 
-#           FIX: Ultimate safety net against NaN poisoning
+            # FIX: Ultimate safety net against NaN poisoning
             if np.isnan(active_ke):
                 active_ke = 0.05 # Fallback to a safe minimum if math fails
 
@@ -164,6 +167,11 @@ class VancoPK:
             curr_c += (rate_in - active_ke * curr_c) * dt
             conc[i] = max(curr_c, 0)
 
+        # FIX: Store the average ke from the last 24 hours in the object
+        # This ensures suggestion formulas match the integrated AUC
+        last_24h_ke = np.mean(ke_history[-steps_per_24h:]) if len(ke_history) >= steps_per_24h else active_ke
+        self.ke = last_24h_ke / max(self.ke_multiplier, 0.01)
+
         if len(conc) >= steps_per_24h:
             # Traversal sum of the last 24 hours of concentrations
             # Multiplying by dt converts the sum of concentrations into Area Under the Curve
@@ -176,9 +184,9 @@ class VancoPK:
             "time": t_grid, 
             "conc": conc, 
             "auc24": auc24, 
-            "ke": active_ke, 
+            "ke": last_24h_ke, # Return the average ke used for AUC calculation
             "vd": self.vd,
-            "half_life": (0.693 / active_ke) if active_ke > 0 else 0
+            "half_life": (LN2 / last_24h_ke) if last_24h_ke > 0 else 0
         }
                 
     def simulate_regimen(self, dose_mg, interval_h, start_dt, end_dt, cr_func, patient_info):

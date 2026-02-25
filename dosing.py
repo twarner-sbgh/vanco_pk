@@ -23,7 +23,7 @@ def suggest_regimen(pk, target_auc=500, patient_info=None):
     Suggests a dose + interval based on half-life and target AUC.
     """
     allowed_intervals = [6, 8, 12, 18, 24, 36, 48, 72]
-    allowed_doses = np.array([250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500])
+    allowed_doses = np.array([500, 750, 1000, 1250, 1500, 1750, 2000, 2500])
 
     # Calculate current clearance (Cl = Ke * Vd)
     # Using pk.ke (baseline) * pk.ke_multiplier (Bayesian fit)

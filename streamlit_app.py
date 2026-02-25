@@ -125,7 +125,7 @@ manual_time_inputs = []
 st.header("Manual Vancomycin Doses")
 for i in range(5):
     if st.checkbox(f"Enable manual dose {i+1}", key=f"md_on_{i}"):
-        dose = st.selectbox("Dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=3, key=f"md_dose_{i}")
+        dose = st.selectbox("Dose (mg)", [500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=3, key=f"md_dose_{i}")
         
         # Fix for datetime input
         col1, col2 = st.columns(2)
@@ -141,7 +141,7 @@ show_ordered_dose = st.checkbox("Display ordered regimen", value=False)
 ordered_dose, ordered_interval, ordered_start = None, None, None
 
 if show_ordered_dose:
-    ordered_dose = st.selectbox("Ordered dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=3)
+    ordered_dose = st.selectbox("Ordered dose (mg)", [500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=2)
     ordered_interval = st.selectbox("Interval (h)", [6, 8, 12, 18, 24, 36, 48, 72], index=2)
     
     # Fix for datetime input
@@ -215,34 +215,44 @@ results = pk.run(
 )
 
 # ---------------------------
-# Suggested Regimen
+# Suggestion & Alignment
 # ---------------------------
 st.header("Try Regimen / Suggested Regimen")
-# Pass the p_info dictionary we created earlier to the suggester
-suggested_dose, suggested_interval, predicted_auc = suggest_regimen(pk, target_auc=500, patient_info=p_info)
-st.markdown(f"**Suggested: {suggested_dose} mg q{suggested_interval}h** (AUC24 ≈ {predicted_auc:.0f})")
 
+# 1. Get the raw suggestion (Dose and Interval)
+suggested_dose, suggested_interval, _ = suggest_regimen(pk, target_auc=500, patient_info=p_info)
+
+# 2. RUN A SIMULATION for that specific suggestion to get the "Summary-style" AUC
+# This ensures the label and the summary metrics use the exact same math
+suggestion_sim = pk.simulate_regimen(
+    suggested_dose, 
+    suggested_interval, 
+    sim_start, 
+    sim_end, 
+    cr_func, 
+    p_info
+)
+simulated_suggested_auc = suggestion_sim['auc24']
+
+# 3. Display the label using the simulated value
+st.markdown(f"**Suggested: {suggested_dose} mg q{suggested_interval}h** (Simulated AUC24 ≈ {simulated_suggested_auc:.0f})")
+
+# ---------------------------
+# Try Regimen UI
+# ---------------------------
 show_try_regimen = st.checkbox("Show try/suggested regimen on graph", value=False)
-try_dose = st.selectbox("Try dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500], 
-                        index=[250,500,750,1000,1250,1500,1750,2000,2500].index(suggested_dose))
+
+# Sync the 'Try' boxes to the suggestion by default
+try_dose = st.selectbox("Try dose (mg)", [500, 750, 1000, 1250, 1500, 1750, 2000, 2500], 
+                        index=[500,750,1000,1250,1500,1750,2000,2500].index(suggested_dose))
 try_interval = st.selectbox("Try interval (h)", [6, 8, 12, 18, 24, 36, 48, 72], 
                             index=[6,8,12,18,24,36,48,72].index(suggested_interval))
 
-# Initialize try_results to prevent NameError
-try_results = None 
-
 if show_try_regimen:
-    # end_dt is usually the start + the simulation duration
-    sim_end = sim_start + timedelta(days=duration_days)
-    
-    try_results = pk.simulate_regimen(
-        dose_mg=try_dose, 
-        interval_h=try_interval, 
-        start_dt=sim_start, 
-        end_dt=sim_end,
-        cr_func=cr_func, 
-        patient_info=p_info
-    )
+    # If the user hasn't changed the selectboxes, this will match suggestion_sim exactly
+    try_results = pk.simulate_regimen(try_dose, try_interval, sim_start, sim_end, cr_func, p_info)
+else:
+    try_results = None
 
 # ---------------------------
 # Plotting (Dual Axis)

@@ -67,7 +67,7 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             x=t_dates_try, 
             y=try_results["conc"], 
             name="Vanco ('Try' Regimen)", 
-            line=dict(color="green", width=2, dash="dash")
+            line=dict(color="teal", width=2, dash="dot")
         ))
 
     # 5. Creatinine (Right Axis - Orchid)
@@ -95,6 +95,9 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
         paper_bgcolor='white',
         xaxis=dict(
             title="Date/Time",
+            type="date",              # Force Plotly to treat this as a timeline
+            tickformat="%a %H:%M",    # Format: "Mon 14:30"
+            dtick=43200000,
             showline=True, 
             linecolor='black', 
             gridcolor='lightgrey',
@@ -133,7 +136,7 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             bordercolor="black",
             borderwidth=1
         ),
-        margin=dict(l=50, r=50, t=50, b=50) # Standard margins
+        margin=dict(l=50, r=50, t=50, b=80) # Standard margins
     )
     
     return fig
