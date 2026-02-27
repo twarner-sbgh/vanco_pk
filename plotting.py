@@ -1,17 +1,15 @@
 from datetime import timedelta
 import plotly.graph_objects as go
 
-def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=None, try_results=None, ci_bounds=None):
+def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=None, try_results=None, ci_bounds=None, static_crcl=None):
     """
-    Plots Vancomycin simulation with separate colors for Cr and kGFR.
-    Legend is placed inside the top-left corner of the plot area.
+    Plots Vancomycin simulation with separate colors for CrCl and kGFR on the Y2 axis.
     """
     # Primary time grid for the main simulation and Cr/kGFR lines
     t_dates_main = [sim_start + timedelta(hours=h) for h in results["time"]]
     
     # Get dual data from cr_func (Expected return: (Cr, kGFR))
     cr_plot_data = [cr_func(d) for d in t_dates_main]
-    cr_vals = [d[0] for d in cr_plot_data]
     kgfr_vals = [d[1] for d in cr_plot_data]
 
     fig = go.Figure()
@@ -26,7 +24,7 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             fill='toself',
             fillcolor='rgba(0, 0, 255, 0.1)',
             line=dict(color='rgba(255,255,255,0)'),
-            name='Confidence Interval',
+            name='CI (50%)',
             showlegend=True
         ))
 
@@ -70,22 +68,25 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             line=dict(color="teal", width=2, dash="dot")
         ))
 
-    # 5. Creatinine (Right Axis - Orchid)
-    fig.add_trace(go.Scatter(
-        x=t_dates_main, 
-        y=cr_vals, 
-        name="Creatinine", 
-        line=dict(color="orchid", width=1.5, dash="dot"), 
-        yaxis="y2"
-    ))
+    # 5. Static Estimated CrCl 
+    # This plots a horizontal reference line based on the last Cr lab value entered
+    if static_crcl is not None:
+        fig.add_trace(go.Scatter(
+            x=[t_dates_main[0], t_dates_main[-1]],
+            y=[static_crcl, static_crcl],
+            name=f"Est CrCl (CG): {static_crcl:.0f} mL/min",
+            mode="lines",  
+            line=dict(color='indigo', width=1, dash='dot'),
+            yaxis="y2"
+        ))
 
-    # 6. Kinetic GFR (Right Axis - Indigo)
+    # 6. Kinetic GFR (Right Axis - darkorchid)
     if any(k is not None for k in kgfr_vals):
         fig.add_trace(go.Scatter(
             x=t_dates_main, 
             y=kgfr_vals, 
             name="Kinetic GFR", 
-            line=dict(color="indigo", width=2, dash="dash"), 
+            line=dict(color="darkorchid", width=2, dash="dash"), 
             yaxis="y2"
         ))
 
@@ -117,7 +118,7 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             rangemode='tozero'         # ALIGNS THE BOTTOM TO ZERO
         ),
         yaxis2=dict(
-            title=dict(text="Cr (µmol/L) / kGFR (mL/min)", font=dict(color="indigo")),
+            title=dict(text="Estimated CrCl / Kinetic GFR (mL/min)", font=dict(color="indigo")),
             tickfont=dict(color="indigo"),
             overlaying="y",
             side="right",

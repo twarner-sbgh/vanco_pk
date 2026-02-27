@@ -275,15 +275,38 @@ if len(levels) >= 1:
     pk.ke_multiplier = current_fitted_mult
     ci_bounds = (res_lo, res_hi)
 
-# 2. Call the modularized plotting function
+# --- Calculate Static CrCl for inclusion on the Y2 Axis ---
+
+if st.session_state.cr_entries:
+    # Use the last entry in the list
+    last_entry = st.session_state.cr_entries[-1]
+    
+    # Calculate parameters (including crcl) for that specific lab value
+    static_params = pk_params_from_patient(
+        age=age, 
+        sex=sex, 
+        weight=weight, 
+        height=height, 
+        cr_func=cr_func, 
+        when=last_entry['time']
+    )
+    current_static_crcl = static_params['crcl']
+else:
+    current_static_crcl = None
+
+# Identify the most recent entry (last one added)
+last_entry = st.session_state.cr_entries[-1]
+
+# 2. Call the modified plotting function with the extra arguments
 fig = plot_vanco_simulation(
     sim_start=sim_start,
     results=results,
     cr_func=cr_func,
     levels=levels,
     level_times=level_times,
-    try_results=try_results, # No longer needs 'if show_try_regimen else None'
-    ci_bounds=ci_bounds
+    try_results=try_results,
+    ci_bounds=ci_bounds,
+    static_crcl=current_static_crcl 
 )
 
 st.plotly_chart(fig, use_container_width=True)
