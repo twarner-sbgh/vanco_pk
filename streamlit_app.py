@@ -125,7 +125,7 @@ manual_time_inputs = []
 st.header("Manual Vancomycin Doses")
 for i in range(5):
     if st.checkbox(f"Enable manual dose {i+1}", key=f"md_on_{i}"):
-        dose = st.selectbox("Dose (mg)", [500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=3, key=f"md_dose_{i}")
+        dose = st.selectbox("Dose (mg)", [500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=2, key=f"md_dose_{i}")
         
         # Fix for datetime input
         col1, col2 = st.columns(2)

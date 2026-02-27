@@ -94,10 +94,12 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
         plot_bgcolor='white',
         paper_bgcolor='white',
         xaxis=dict(
-            title="Date/Time",
-            type="date",              # Force Plotly to treat this as a timeline
-            tickformat="%a %H:%M",    # Format: "Mon 14:30"
-            dtick=43200000,
+            title=dict(text="Date/Time", font=dict(color="black")),
+            tickfont=dict(color="black"),            
+            type="date",     # Force Plotly to treat this as a timeline
+            tickformat="%d %b", # Can return to date & time if needed with: "%d %b %H:%M"
+            hoverformat="%b %d, %H:%M", # to display time on hover
+            dtick=86400000, # ticks at 24 hr intervals
             showline=True, 
             linecolor='black', 
             gridcolor='lightgrey',
