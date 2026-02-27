@@ -3,10 +3,8 @@ from datetime import timedelta, datetime
 from scipy.interpolate import interp1d
 
 def calculate_kgfr(cr1, cr2, delta_t_hours, weight, height, age, sex):
-    """Calculates Kinetic GFR (kGFR) for AKI settings using ABW for Volume of Distribution."""
+    """Calculates Kinetic GFR (kGFR) for AKI settings using Mass Balance."""
     k_sex = 0.85 if sex == "Female" else 1.0
-    # Baseline Cl (mL/min) - Cockcroft-Gault
-    baseline_cl = ((140 - age) * 88.4) / (cr1) * k_sex * 0.9 # Serum-to-plasma correction
     
     # Calculate Ideal Body Weight (IBW) based on height (cm)
     if sex.lower().startswith("m") or sex == "Male":
@@ -22,20 +20,27 @@ def calculate_kgfr(cr1, cr2, delta_t_hours, weight, height, age, sex):
         
     v_dist = 0.6 * weight_for_vd # Creatinine Vd in Liters
     
-    # Production rate in umol/hr
-    # Cl(mL/min) * 0.06 = L/hr. L/hr * umol/L = umol/hr
-    production_rate = baseline_cl * 0.06 * cr1
+    # Constant creatinine production rate (umol/hr) based on Cockcroft-Gault numerator
+    # (140 - age) * 88.4 * k_sex * 0.9 * 0.06
+    production_rate = (140 - age) * 88.4 * k_sex * 0.9 * 0.06 
     
-    # Kinetic GFR formula
-    delta_cr = cr2 - cr1
-    if delta_t_hours <= 0 or production_rate <= 0:
-        return baseline_cl
+    if delta_t_hours <= 0:
+        # Fallback to instantaneous CrCl at cr2 if no time has passed
+        return (production_rate / 0.06) / cr2
         
-    kgfr = baseline_cl * (1 - (v_dist * delta_cr) / (production_rate * delta_t_hours))
+    # Rate of change in mass of creatinine in the body (umol/hr)
+    accumulation_rate = (v_dist * (cr2 - cr1)) / delta_t_hours
     
-    # Safety clamp to prevent negative or NaN kGFR
-    if np.isnan(kgfr) or kgfr < 0.1:
-        return 0.1
+    # The actual amount of creatinine being cleared per hour
+    elimination_rate = production_rate - accumulation_rate
+    
+    # To get clearance at the CURRENT moment, we divide elimination rate by CURRENT concentration
+    # kGFR = Elimination Rate / (0.06 * Cr2)  [0.06 converts L/hr to mL/min]
+    if elimination_rate <= 0:
+        kgfr = 0.1 # Effectively 0, kidneys are not clearing enough to even match accumulation
+    else:
+        kgfr = elimination_rate / (0.06 * cr2)
+    
     return kgfr
 
 def build_creatinine_function(cr_data, future_cr=None, modified_factor=1.0, patient_params=None):

@@ -76,17 +76,21 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             y=[static_crcl, static_crcl],
             name=f"Est CrCl (CG): {static_crcl:.0f} mL/min",
             mode="lines",  
-            line=dict(color='indigo', width=1, dash='dot'),
+            line=dict(color='indigo', width=1, dash='dash'),
             yaxis="y2"
         ))
 
     # 6. Kinetic GFR (Right Axis - darkorchid)
-    if any(k is not None for k in kgfr_vals):
+    valid_kgfrs = [k for k in kgfr_vals if k is not None]
+    if valid_kgfrs:
+        # Grab the latest kGFR value to display in the legend
+        latest_kgfr = valid_kgfrs[-1]
+        
         fig.add_trace(go.Scatter(
             x=t_dates_main, 
             y=kgfr_vals, 
-            name="Kinetic GFR", 
-            line=dict(color="darkorchid", width=2, dash="dash"), 
+            name=f"Kinetic GFR: {latest_kgfr:.0f} mL/min", 
+            line=dict(color="darkorchid", width=2, dash="dot"), 
             yaxis="y2"
         ))
 
