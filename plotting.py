@@ -1,20 +1,29 @@
 from datetime import timedelta
 import plotly.graph_objects as go
 
-def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=None, try_results=None, ci_bounds=None, static_crcl=None):
+def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=None, try_results=None, ci_bounds=None, static_crcl=None, results_kgfr=None):
     """
     Plots Vancomycin simulation with separate colors for CrCl and kGFR on the Y2 axis.
     """
-    # Primary time grid for the main simulation and Cr/kGFR lines
     t_dates_main = [sim_start + timedelta(hours=h) for h in results["time"]]
     
-    # Get dual data from cr_func (Expected return: (Cr, kGFR))
     cr_plot_data = [cr_func(d) for d in t_dates_main]
     kgfr_vals = [d[1] for d in cr_plot_data]
+    valid_kgfrs = [k for k in kgfr_vals if k is not None]
 
     fig = go.Figure()
 
-    # 1. Confidence Interval (IQR Shadow)
+    # 1. Plot the Shadow Simulation (kGFR)
+    if results_kgfr is not None:
+        t_dates_kgfr = [sim_start + timedelta(hours=h) for h in results_kgfr["time"]]
+        fig.add_trace(go.Scatter(
+            x=t_dates_kgfr, y=results_kgfr["conc"],
+            mode='lines', name='Vanco (Predicted with kGFR)',
+            line=dict(color='rgba(173, 216, 230, 0.6)', width=4), # Pale Blue (LightBlue)
+            hoverinfo='none' # Keep tooltip clean
+        ))
+
+    # 2. Confidence Interval (IQR Shadow)
     if ci_bounds:
         res_lo, res_hi = ci_bounds
         t_dates_ci = [sim_start + timedelta(hours=h) for h in res_lo["time"]]
@@ -28,48 +37,47 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             showlegend=True
         ))
 
-    # 2. Vanco Concentration Line (Main)
+    # 3. Vanco Concentration Line (Main/CrCl)
     fig.add_trace(go.Scatter(
         x=t_dates_main, 
         y=results["conc"], 
         name="Vanco (Current)", 
+        mode='lines',
         line=dict(color="blue", width=3)
     ))
 
-    # 3. Measured Levels (High-contrast markers with text labels)
+    # 4. Measured Levels (High-contrast markers with text labels)
     if levels is not None and len(levels) > 0:
-        # Create a formatted list of strings for the label showing value and time
-        # Format: "15.0 mg/L<br>Feb 21, 14:30"
         level_texts = [f"{lvl:.1f} mg/L<br>{t.strftime('%b %d, %H:%M')}" for lvl, t in zip(levels, level_times)]
         
         fig.add_trace(go.Scatter(
             x=level_times, 
             y=levels, 
-            mode="markers+text",       # ENABLE TEXT
+            mode="markers+text",       
             name="Measured Levels", 
-            text=level_texts,          # APPLY THE FORMATTED STRINGS
-            textposition="bottom center", # PLACE IT DIRECTLY UNDER THE MARKER
-            textfont=dict(color="black", size=10), # KEEP IT READABLE BUT SMALL
+            text=level_texts,          
+            textposition="bottom center", 
+            textfont=dict(color="black", size=10), 
             marker=dict(
                 color="red", 
-                size=8,                # CHANGED FROM 12 TO 8
+                size=8,                
                 symbol="diamond",
-                line=dict(width=1.5, color="black") # Slightly thinner outline to match the smaller size
+                line=dict(width=1.5, color="black") 
             )
         ))
 
-    # 4. Try Regimen Comparison
+    # 5. Try Regimen Comparison
     if try_results is not None:
         t_dates_try = [sim_start + timedelta(hours=h) for h in try_results["time"]]
         fig.add_trace(go.Scatter(
             x=t_dates_try, 
             y=try_results["conc"], 
             name="Vanco ('Try' Regimen)", 
-            line=dict(color="teal", width=2, dash="dot")
+            mode='lines',
+            line=dict(color="#29b09d", width=1.5)
         ))
 
-    # 5. Static Estimated CrCl 
-    # This plots a horizontal reference line based on the last Cr lab value entered
+    # 6. Static Estimated CrCl 
     if static_crcl is not None:
         fig.add_trace(go.Scatter(
             x=[t_dates_main[0], t_dates_main[-1]],
@@ -80,12 +88,10 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             yaxis="y2"
         ))
 
-    # 6. Kinetic GFR (Right Axis - darkorchid)
+    # 7. Kinetic GFR Line 
     valid_kgfrs = [k for k in kgfr_vals if k is not None]
     if valid_kgfrs:
-        # Grab the latest kGFR value to display in the legend
         latest_kgfr = valid_kgfrs[-1]
-        
         fig.add_trace(go.Scatter(
             x=t_dates_main, 
             y=kgfr_vals, 
@@ -95,16 +101,20 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
         ))
 
     # --- STYLE & LEGEND ---
+
+    # Dynamic Y2 Axis Title
+    y2_title = "Kinetic GFR (mL/min)" if len(valid_kgfrs) > 0 else "Est CrCl (mL/min)"
+
     fig.update_layout(
         plot_bgcolor='white',
         paper_bgcolor='white',
         xaxis=dict(
             title=dict(text="Date/Time", font=dict(color="black")),
             tickfont=dict(color="black"),            
-            type="date",     # Force Plotly to treat this as a timeline
-            tickformat="%d %b", # Can return to date & time if needed with: "%d %b %H:%M"
-            hoverformat="%b %d, %H:%M", # to display time on hover
-            dtick=86400000, # ticks at 24 hr intervals
+            type="date",     
+            tickformat="%d %b", 
+            hoverformat="%b %d, %H:%M", 
+            dtick=86400000, 
             showline=True, 
             linecolor='black', 
             gridcolor='lightgrey',
@@ -119,7 +129,7 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             showgrid=True,
             zeroline=True,
             zerolinecolor='lightgrey',
-            rangemode='tozero'         # ALIGNS THE BOTTOM TO ZERO
+            rangemode='tozero'         
         ),
         yaxis2=dict(
             title=dict(text="Estimated CrCl / Kinetic GFR (mL/min)", font=dict(color="indigo")),
@@ -128,10 +138,9 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             side="right",
             showline=True, 
             linecolor='black',
-            showgrid=False,            # Keeps grid tied only to Vanco scale
-            rangemode='tozero'         # MATCHES PRIMARY AXIS
+            showgrid=False,            
+            rangemode='tozero'         
         ),
-        # Legend positioned inside the plot area at the top-left
         legend=dict(
             orientation="v", 
             yanchor="top",
@@ -139,11 +148,11 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             xanchor="left",
             x=0.01,
             font=dict(color="black", size=11),
-            bgcolor="rgba(255, 255, 255, 0.8)", # Slightly more opaque for readability
+            bgcolor="rgba(255, 255, 255, 0.7)", 
             bordercolor="black",
             borderwidth=1
         ),
-        margin=dict(l=50, r=50, t=50, b=80) # Standard margins
+        margin=dict(l=40, r=40, t=40, b=40) 
     )
     
     return fig

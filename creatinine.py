@@ -61,7 +61,7 @@ def build_creatinine_function(cr_data, future_cr=None, modified_factor=1.0, pati
     if len(times) < 2:
         return lambda t: (float(values[0]), None)
         
-    interp_func = interp1d(t_floats, values, kind='linear', fill_value="extrapolate")
+    interp_func = interp1d(t_floats, values, kind='linear', bounds_error=False, fill_value=(values[0], values[-1]))
 
     def cr_logic(t):
         # Robustness check: if t is not a datetime, return first value

@@ -199,19 +199,30 @@ cr_func = build_creatinine_function(
 # Initialize the PK engine
 pk = VancoPK(ke_pop, vd_pop)
 
+# 1. Primary Simulation (The Blue Plot - CrCl based)
 if len(levels) >= 1:
-    pk.fit_ke_from_levels(doses, level_times, levels, sim_start, cr_func=cr_func, patient_info=p_info)
+    # Notice we pass mode="crcl" explicitly, though it is the default
+    pk.fit_ke_from_levels(doses, level_times, levels, sim_start, cr_func=cr_func, patient_info=p_info, mode="crcl")
     st.info(f"Model fitted to {len(levels)} level(s).")
 else:
     st.warning("Using population PK estimates.")
 
-# Run the simulation
+# 2. Kinetic Simulation (The Shadow - kGFR based)
+# This creates a separate dict of results entirely driven by the kGFR math
+# Kinetic calculation (The "Shadow") - only run if 2+ Cr entries exist
+results_kgfr = None
+if len(st.session_state.cr_entries) >= 2:
+    # Use a dummy copy or mode flag if your VancoPK supports it to force kGFR logic
+    results_kgfr = pk.run(doses=doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info, mode="kgfr")
+
+# 3. Standard Simulation (The Results - CrCl based)
 results = pk.run(
     doses=doses,
     duration_days=duration_days,
     sim_start=sim_start,
     cr_func=cr_func,
-    patient_info=p_info 
+    patient_info=p_info,
+    mode="crcl" # <-- CRITICAL FIX: Ensure the main logic uses CrCl
 )
 
 # ---------------------------
@@ -262,51 +273,40 @@ ci_bounds = None
 
 if len(levels) >= 1:
     mult_lo, mult_hi = pk.compute_ci(level=0.5)
-    
     current_fitted_mult = pk.ke_multiplier
     
-    # Simulate bounds for shading
+    # Simulate bounds (CrCl mode by default)
     pk.ke_multiplier = mult_hi 
-    res_hi = pk.run(doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info)
+    res_hi = pk.run(doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info, mode="crcl")
     
     pk.ke_multiplier = mult_lo
-    res_lo = pk.run(doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info)
+    res_lo = pk.run(doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info, mode="crcl")
     
     pk.ke_multiplier = current_fitted_mult
     ci_bounds = (res_lo, res_hi)
 
 # --- Calculate Static CrCl for inclusion on the Y2 Axis ---
-
 if st.session_state.cr_entries:
-    # Use the last entry in the list
     last_entry = st.session_state.cr_entries[-1]
-    
-    # Calculate parameters (including crcl) for that specific lab value
     static_params = pk_params_from_patient(
-        age=age, 
-        sex=sex, 
-        weight=weight, 
-        height=height, 
-        cr_func=cr_func, 
-        when=last_entry['time']
+        age=age, sex=sex, weight=weight, height=height, 
+        cr_func=cr_func, when=last_entry['time']
     )
     current_static_crcl = static_params['crcl']
 else:
     current_static_crcl = None
 
-# Identify the most recent entry (last one added)
-last_entry = st.session_state.cr_entries[-1]
-
-# 2. Call the modified plotting function with the extra arguments
+# Pass everything to the chart
 fig = plot_vanco_simulation(
-    sim_start=sim_start,
-    results=results,
-    cr_func=cr_func,
-    levels=levels,
-    level_times=level_times,
-    try_results=try_results,
-    ci_bounds=ci_bounds,
-    static_crcl=current_static_crcl 
+    sim_start, 
+    results, 
+    cr_func, 
+    levels, 
+    level_times, 
+    try_results, 
+    ci_bounds, 
+    static_crcl=params['crcl'], 
+    results_kgfr=results_kgfr  # This will be None if < 2 Cr entries
 )
 
 st.plotly_chart(fig, use_container_width=True)
@@ -315,8 +315,13 @@ st.plotly_chart(fig, use_container_width=True)
 # Metrics with Color-Coding
 # ---------------------------
 def show_metrics(label, res, dose=None, interval=None):
-    st.subheader(label)
-    cols = st.columns(6) # Increased to 6 columns
+    # Updated: Format the subheader to include dose and interval if provided
+    if dose and interval:
+        st.subheader(f"{label} ({dose:.0f} mg q{interval:.0f}h)")
+    else:
+        st.subheader(label)
+        
+    cols = st.columns(6) 
     cols[0].metric("ke (1/h)", f"{res['ke']:.3f}")
     cols[1].metric("Half-life (h)", f"{res['half_life']:.1f}")
     cols[2].metric("Vd (L)", f"{res['vd']:.1f}")
@@ -340,10 +345,17 @@ def show_metrics(label, res, dose=None, interval=None):
     else:
         st.error(f"AUC24 of {auc:.0f} is above target range (> 600).")
 
-show_metrics("Summary: Entered Regimen", results, 
-             dose=ordered_dose if show_ordered_dose else None, 
-             interval=ordered_interval if show_ordered_dose else None)
+show_metrics(
+    "Summary: Ordered Regimen", 
+    results, 
+    dose=ordered_dose if show_ordered_dose else None, 
+    interval=ordered_interval if show_ordered_dose else None
+)
 
 if try_results:
-    show_metrics("Summary: Try Regimen", try_results, 
-                 dose=try_dose, interval=try_interval)
+    show_metrics(
+        "Summary: Try Regimen", 
+        try_results, 
+        dose=try_dose, 
+        interval=try_interval
+    )
