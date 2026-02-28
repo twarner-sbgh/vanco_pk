@@ -37,7 +37,7 @@ st.markdown("""
 
     /* Style for ALL tabs (Inactive state) */
     button[data-baseweb="tab"] {
-        font-size: 24px !important;    /* Larger text */
+        font-size: 22px !important;    /* Larger text */
         font-weight: 800 !important;   /* Extra bold */
         background-color: #707070 !important; /* Darker medium-grey */
         color: #FFFFFF !important;     /* White text for contrast */
@@ -61,7 +61,7 @@ st.markdown("""
     
     /* Ensure the text stays visible and large inside the button container */
     div[data-testid="stTabs"] p {
-        font-size: 24px !important;
+        font-size: 20px !important;
         font-weight: 800 !important;
     }
     </style>
