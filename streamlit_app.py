@@ -10,6 +10,17 @@ from dosing import (
 from plotting import plot_vanco_simulation
 import uuid
 
+# ---------------------------
+# Streamlit setup
+# ---------------------------
+st.set_page_config(layout="centered")
+st.markdown("""
+    <div style='text-align: center;'>
+        <h1>Vancomycin PK Simulator</h1>
+        <p style='color: grey;'>
+    </div>
+    """, unsafe_allow_html=True)
+
 # DISCLAIMER
 with st.expander("⚖️ Legal Disclaimer & Terms of Use"):
     st.caption("""
@@ -19,12 +30,6 @@ with st.expander("⚖️ Legal Disclaimer & Terms of Use"):
     3. Final dosing decisions are the sole responsibility of the prescribing clinician. The developer assumes no liability for errors, omissions, or any clinical outcomes resulting from the use of this software.
     4. Pharmacokinetic models are mathematical approximations and may not account for all patient-specific variables. **Always verify dosing calculations and monitor serum levels according to your local guidelines and directives.**
     """)
-
-# ---------------------------
-# Streamlit setup
-# ---------------------------
-st.set_page_config(layout="centered")
-st.title("Vancomycin PK Simulator")
 
 # Formatting of tabs to make them larger and more distinct
 st.markdown("""
