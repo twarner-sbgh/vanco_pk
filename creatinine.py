@@ -2,7 +2,7 @@ import numpy as np
 from datetime import timedelta, datetime
 from scipy.interpolate import interp1d
 
-def calculate_kgfr(cr1, cr2, delta_t_hours, weight, height, age, sex):
+def calculate_kgfr(cr1, cr2, delta_t_hours, weight, height, age, sex, muscle_factor=1.0):
     """Calculates Kinetic GFR (kGFR) for AKI settings using Mass Balance."""
     k_sex = 0.85 if sex == "Female" else 1.0
     
@@ -21,8 +21,8 @@ def calculate_kgfr(cr1, cr2, delta_t_hours, weight, height, age, sex):
     v_dist = 0.6 * weight_for_vd # Creatinine Vd in Liters
     
     # Constant creatinine production rate (umol/hr) based on Cockcroft-Gault numerator
-    # (140 - age) * 88.4 * k_sex * 0.9 * 0.06
-    production_rate = (140 - age) * 88.4 * k_sex * 0.9 * 0.06 
+    # Apply muscle_factor here
+    production_rate = (140 - age) * 88.4 * k_sex * 0.9 * 0.06 * muscle_factor
     
     if delta_t_hours <= 0:
         # Fallback to instantaneous CrCl at cr2 if no time has passed
@@ -89,11 +89,14 @@ def build_creatinine_function(cr_data, future_cr=None, modified_factor=1.0, pati
         
         dt_hours = (times[idx+1] - times[idx]).total_seconds() / 3600
         
+        muscle_factor = patient_params.get('muscle_factor', 1.0)
+        
         # UPDATED: Pass height down to calculate_kgfr for the IBW calculation
         kgfr = calculate_kgfr(
             values[idx], values[idx+1], dt_hours, 
             patient_params['weight'], patient_params['height'], 
-            patient_params['age'], patient_params['sex']
+            patient_params['age'], patient_params['sex'],
+            muscle_factor=muscle_factor
         )
         return current_val, kgfr
 

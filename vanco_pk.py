@@ -1,8 +1,9 @@
+from narwhals import when
 import numpy as np
 from dataclasses import dataclass
-from datetime import datetime, timedelta 
+from datetime import datetime, timedelta
 
-INFUSION_RATE = 1000.0  # mg/hour
+INFUSION_RATE = 1000.0
 LN2 = np.log(2)
 
 def calculate_ss_conc(ke, vd, dose, interval, infusion_rate=INFUSION_RATE):
@@ -20,15 +21,17 @@ class Dose:
     amount: float
     ke: float = None
 
-def pk_params_from_patient(age, sex, weight, height, cr_func, when):
+def pk_params_from_patient(age, sex, weight, height, cr_func, when, muscle_factor=1.0):
     cr_data = cr_func(when)
     cr = cr_data[0] if isinstance(cr_data, (tuple, list)) else cr_data
     cr = max(cr, 10.0)
     if cr is None or cr <= 0:
-        cr = 88.4 
-    crcl = (140 - age) * 88.4 / cr * 0.9 
-    if sex.lower().startswith("f"):
-        crcl *= 0.85
+        cr = 88.4
+        
+    # Apply muscle factor to the Cockcroft-Gault numerator
+    k_sex = 0.85 if sex.lower().startswith("f") else 1.0
+    crcl = ((140 - age) * 88.4 * k_sex * 0.9 * muscle_factor) / cr
+    
     ke = 0.00083 * crcl + 0.0044
     ke = max(min(ke, 0.693 / 5.5), 0.693 / 120)
     if sex.lower().startswith("m"):
@@ -46,7 +49,6 @@ class VancoPK:
         self.ke_multiplier = 1.0
         self.multiplier_sd = 0.2
 
-    # ADDED mode="crcl" HERE
     def run(self, doses, duration_days=7, sim_start=None, cr_func=None, patient_info=None, mode="crcl"):
         if patient_info is None:
                 raise ValueError("patient_info dictionary must be provided to run simulation.")
@@ -55,10 +57,11 @@ class VancoPK:
         sex = patient_info['sex']
         weight = patient_info['weight']
         height = patient_info['height']
+        muscle_factor = patient_info.get('muscle_factor', 1.0)
                 
         t_max = duration_days * 24
         t_grid = np.linspace(0, t_max, int(t_max * 12) + 1)
-        dt = t_grid[1] - t_grid[0] 
+        dt = t_grid[1] - t_grid[0]
         steps_per_24h = int(24 / dt)    
 
         dose_intervals = []
@@ -72,7 +75,8 @@ class VancoPK:
                 pop_ke_traj[i] = pk_params_from_patient(
                     patient_info['age'], patient_info['sex'], 
                     patient_info['weight'], patient_info['height'], 
-                    cr_func, sim_start + timedelta(hours=t_h)
+                    cr_func, sim_start + timedelta(hours=t_h),
+                    muscle_factor=muscle_factor
                 )['ke']
 
         self.ke = pop_ke_traj[-1] 
@@ -81,14 +85,14 @@ class VancoPK:
         curr_c = 0.0
         active_ke = self.ke
 
-        ke_history = [] 
+        ke_history = []
 
         for i, t_h in enumerate(t_grid):
             current_dt = sim_start + timedelta(hours=t_h)
-            cr_val, kgfr = cr_func(current_dt) 
+            cr_val, kgfr = cr_func(current_dt)
+            
             vd_safe = self.vd if (self.vd and self.vd > 0) else 50.0
             
-            # --- THE CRITICAL LOGIC SWITCH ---
             if mode == "kgfr" and kgfr is not None:
                 active_ke = ((kgfr * 0.06) / vd_safe) * self.ke_multiplier
             else:
@@ -97,9 +101,10 @@ class VancoPK:
             active_ke = max(min(active_ke, 0.17), 0.005)
             
             if np.isnan(active_ke):
-                active_ke = 0.05 
-
+                active_ke = 0.05
+                
             ke_history.append(active_ke) 
+
             self.ke = active_ke / max(self.ke_multiplier, 0.01)
             
             rate_in = 0.0
@@ -124,12 +129,11 @@ class VancoPK:
             "time": t_grid, 
             "conc": conc, 
             "auc24": auc24, 
-            "ke": last_24h_ke,
+            "ke": active_ke, 
             "vd": vd_safe,
-            "half_life": (LN2 / last_24h_ke) if last_24h_ke > 0 else 0
+            "half_life": (np.log(2) / active_ke) if active_ke > 0 else 0
         }
                 
-    # ADDED mode="crcl" HERE
     def simulate_regimen(self, dose_mg, interval_h, start_dt, end_dt, cr_func, patient_info, mode="crcl"):
             duration_h = (end_dt - start_dt).total_seconds() / 3600
             duration_days = duration_h / 24
@@ -146,7 +150,7 @@ class VancoPK:
                 sim_start=start_dt, 
                 cr_func=cr_func, 
                 patient_info=patient_info,
-                mode=mode # Pass mode down to run()
+                mode=mode
             )
 
     def _run_fast(self, doses, t_grid, ke_traj, multiplier):
@@ -164,7 +168,6 @@ class VancoPK:
             conc[i] = max(curr_c, 0)
         return conc
 
-    # ADDED mode="crcl" HERE
     def fit_ke_from_levels(self, doses, times_dt, obs, sim_start, cr_func, patient_info, duration_days=7, mode="crcl"):
         times_h = [(t - sim_start).total_seconds() / 3600 for t in times_dt]
         obs = np.array(obs)
@@ -176,15 +179,15 @@ class VancoPK:
         for i, th in enumerate(t_grid):
             current_dt = sim_start + timedelta(hours=th)
             cr_val, kgfr = cr_func(current_dt)
+            muscle_factor = patient_info.get('muscle_factor', 1.0)
             
-            # --- THE CRITICAL LOGIC SWITCH FOR FITTING ---
             if mode == "kgfr" and kgfr is not None:
                 base_ke_traj[i] = (kgfr * 0.06) / self.vd
             else:
                 p_dict = pk_params_from_patient(
                     patient_info['age'], patient_info['sex'], 
                     patient_info['weight'], patient_info['height'], 
-                    cr_func, current_dt
+                    cr_func, current_dt, muscle_factor=muscle_factor
                 )
                 base_ke_traj[i] = p_dict['ke']
 

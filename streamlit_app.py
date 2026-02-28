@@ -10,11 +10,21 @@ from dosing import (
 from plotting import plot_vanco_simulation
 import uuid
 
+# DISCLAIMER
+with st.expander("⚖️ Legal Disclaimer & Terms of Use"):
+    st.caption("""
+    By using this application, you acknowledge that:
+    1. This tool is for **educational and informational purposes only**. It is not a substitute for professional clinical judgment, institutional protocols, or the advice of a qualified healthcare provider.
+    2. This software is provided "as is" without warranties of any kind.
+    3. Final dosing decisions are the sole responsibility of the prescribing clinician. The developer assumes no liability for errors, omissions, or any clinical outcomes resulting from the use of this software.
+    4. Pharmacokinetic models are mathematical approximations and may not account for all patient-specific variables. **Always verify dosing calculations and monitor serum levels according to your local guidelines and directives.**
+    """)
+
 # ---------------------------
 # Streamlit setup
 # ---------------------------
 st.set_page_config(layout="centered")
-st.title("Vancomycin PK Simulator (under construction)")
+st.title("Vancomycin PK Simulator")
 
 # ---------------------------
 # Simulation settings
@@ -39,9 +49,25 @@ weight = st.slider("Weight (kg)", 30.0, 200.0, 75.0, 0.5)
 height = st.slider("Height (cm)", 140.0, 230.0, 175.0, 0.5)
 
 # ---------------------------
-# Creatinine History & Modeling
+# Plasma Creatinine
 # ---------------------------
 st.header("Plasma Creatinine")
+
+# Muscle Mass Factor - This is a simple categorical choice that adjusts the creatinine production rate in the model.
+MUSCLE_FACTORS = {
+    "High (Athletic / High Muscle), 1.25x": 1.25,
+    "Average": 1.0,
+    "Low (Frail / Elderly / Mildly Cachectic), 0.75x": 0.75,
+    "Very Low (Severe Sarcopenia / Paralysis / Bed-Bound), 0.5x": 0.5
+}
+
+muscle_mass_choice = st.selectbox(
+    "Presumed Muscle Mass", 
+    options=list(MUSCLE_FACTORS.keys()), 
+    index=1,
+    help="Adjusts presumed creatinine production used to generate kinetic GFR from two creatinine values."
+)
+selected_factor = MUSCLE_FACTORS[muscle_mass_choice]
 
 # 1. Initialize session state
 if 'cr_entries' not in st.session_state:
@@ -95,25 +121,37 @@ for i, entry in enumerate(st.session_state.cr_entries):
                 st.session_state.cr_entries.pop(i)
                 st.rerun()
 
-# Using a heavy plus sign (✚) and text. 
-# It will use your Blue theme color if you click it, and look clean and native.
-if st.button("✚ Add Measured PCr", key="add_cr_btn"):
+# Updated "add Cr" button with tooltip
+if st.button(
+    "✚ Add Measured PCr", 
+    key="add_cr_btn", 
+    help="For best results, enter two measurements at least a day apart"
+):
     last_val = st.session_state.cr_entries[-1]['val']
     st.session_state.cr_entries.append({
         'id': str(uuid.uuid4()),
         'val': last_val,
-        'time': datetime.now()
+        'time': datetime.now(),         
     })
     st.rerun()
 
 # 3. Final Logic Assembly
 cr_data = [(e['time'], e['val']) for e in st.session_state.cr_entries]
 
-# We set future_cr to None and modified_factor to 1.0 (no change)
+# --- Core Patient Data ---
+p_info = {
+    'age': age,
+    'sex': sex,
+    'weight': weight,
+    'height': height,
+    'muscle_factor': selected_factor
+}
+
 cr_func = build_creatinine_function(
     cr_data=cr_data, 
     future_cr=None, 
-    modified_factor=1.0
+    modified_factor=1.0,
+    patient_params=p_info
 )
 
 # ---------------------------
@@ -175,44 +213,28 @@ for i in range(5):
 # ---------------------------
 # Core Simulation Logic
 # ---------------------------
-# Pack patient data for the simulation loop
-# Ensure p_info is defined for the fitting logic
-p_info = {
-    'age': age,
-    'sex': sex,
-    'weight': weight,
-    'height': height
-}
-
 # Parameters for PK model are now returned as a dictionary
-params = pk_params_from_patient(age, sex, weight, height, cr_func, sim_start)
+params = pk_params_from_patient(age, sex, weight, height, cr_func, sim_start, muscle_factor=selected_factor)
 ke_pop = params['ke']
 vd_pop = params['vd']
-
-cr_func = build_creatinine_function(
-    cr_data=cr_data, 
-    future_cr=None,           # Removes the "Future" projection
-    modified_factor=1.0,      # Keeps measurements at 1:1 (no multiplier)
-    patient_params=p_info     # Keeps the patient demographics/context
-)
 
 # Initialize the PK engine
 pk = VancoPK(ke_pop, vd_pop)
 
 # 1. Primary Simulation (The Blue Plot - CrCl based)
 if len(levels) >= 1:
-    # Notice we pass mode="crcl" explicitly, though it is the default
     pk.fit_ke_from_levels(doses, level_times, levels, sim_start, cr_func=cr_func, patient_info=p_info, mode="crcl")
-    st.info(f"Model fitted to {len(levels)} level(s).")
+    # Store message for later display
+    fit_status_msg = f"Model fitted to {len(levels)} level(s)."
+    is_fitted = True
 else:
-    st.warning("Using population PK estimates.")
+    # Store message for later display
+    fit_status_msg = "Using population PK estimates (no levels entered)."
+    is_fitted = False
 
 # 2. Kinetic Simulation (The Shadow - kGFR based)
-# This creates a separate dict of results entirely driven by the kGFR math
-# Kinetic calculation (The "Shadow") - only run if 2+ Cr entries exist
 results_kgfr = None
 if len(st.session_state.cr_entries) >= 2:
-    # Use a dummy copy or mode flag if your VancoPK supports it to force kGFR logic
     results_kgfr = pk.run(doses=doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info, mode="kgfr")
 
 # 3. Standard Simulation (The Results - CrCl based)
@@ -222,7 +244,7 @@ results = pk.run(
     sim_start=sim_start,
     cr_func=cr_func,
     patient_info=p_info,
-    mode="crcl" # <-- CRITICAL FIX: Ensure the main logic uses CrCl
+    mode="crcl" 
 )
 
 # ---------------------------
@@ -234,7 +256,6 @@ st.header("Try Regimen / Suggested Regimen")
 suggested_dose, suggested_interval, _ = suggest_regimen(pk, target_auc=500, patient_info=p_info)
 
 # 2. RUN A SIMULATION for that specific suggestion to get the "Summary-style" AUC
-# This ensures the label and the summary metrics use the exact same math
 suggestion_sim = pk.simulate_regimen(
     suggested_dose, 
     suggested_interval, 
@@ -260,7 +281,6 @@ try_interval = st.selectbox("Try interval (h)", [6, 8, 12, 18, 24, 36, 48, 72],
                             index=[6,8,12,18,24,36,48,72].index(suggested_interval))
 
 if show_try_regimen:
-    # If the user hasn't changed the selectboxes, this will match suggestion_sim exactly
     try_results = pk.simulate_regimen(try_dose, try_interval, sim_start, sim_end, cr_func, p_info)
 else:
     try_results = None
@@ -268,14 +288,12 @@ else:
 # ---------------------------
 # Plotting (Dual Axis)
 # ---------------------------
-# 1. Prepare CI bounds if necessary
 ci_bounds = None
 
 if len(levels) >= 1:
     mult_lo, mult_hi = pk.compute_ci(level=0.5)
     current_fitted_mult = pk.ke_multiplier
     
-    # Simulate bounds (CrCl mode by default)
     pk.ke_multiplier = mult_hi 
     res_hi = pk.run(doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info, mode="crcl")
     
@@ -290,7 +308,7 @@ if st.session_state.cr_entries:
     last_entry = st.session_state.cr_entries[-1]
     static_params = pk_params_from_patient(
         age=age, sex=sex, weight=weight, height=height, 
-        cr_func=cr_func, when=last_entry['time']
+        cr_func=cr_func, when=last_entry['time'], muscle_factor=selected_factor
     )
     current_static_crcl = static_params['crcl']
 else:
@@ -305,17 +323,22 @@ fig = plot_vanco_simulation(
     level_times, 
     try_results, 
     ci_bounds, 
-    static_crcl=params['crcl'], 
-    results_kgfr=results_kgfr  # This will be None if < 2 Cr entries
+    static_crcl=current_static_crcl, 
+    results_kgfr=results_kgfr  
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
+# Disclaimer re pop PK vs fitted model after the plot
+if is_fitted:
+    st.info(fit_status_msg)
+else:
+    st.warning(fit_status_msg)
 
 # ---------------------------
 # Metrics with Color-Coding
 # ---------------------------
 def show_metrics(label, res, dose=None, interval=None):
-    # Updated: Format the subheader to include dose and interval if provided
     if dose and interval:
         st.subheader(f"{label} ({dose:.0f} mg q{interval:.0f}h)")
     else:
@@ -328,7 +351,6 @@ def show_metrics(label, res, dose=None, interval=None):
     cols[3].metric("AUC24", f"{res['auc24']:.0f}")
     
     if dose and interval:
-        # Use the finalized ke from the simulation results
         cpk, ctr = calculate_ss_conc(res['ke'], res['vd'], dose, interval)
         cols[4].metric("Cpkss (mg/L)", f"{cpk:.1f}")
         cols[5].metric("Ctrss (mg/L)", f"{ctr:.1f}")
