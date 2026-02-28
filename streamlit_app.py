@@ -37,7 +37,7 @@ st.markdown("""
 
     /* Style for ALL tabs (Inactive state) */
     button[data-baseweb="tab"] {
-        font-size: 22px !important;    /* Larger text */
+        font-size: 20px !important;    /* Larger text */
         font-weight: 800 !important;   /* Extra bold */
         background-color: #707070 !important; /* Darker medium-grey */
         color: #FFFFFF !important;     /* White text for contrast */
@@ -61,7 +61,7 @@ st.markdown("""
     
     /* Ensure the text stays visible and large inside the button container */
     div[data-testid="stTabs"] p {
-        font-size: 20px !important;
+        font-size: 19px !important;
         font-weight: 800 !important;
     }
     </style>
@@ -88,7 +88,7 @@ with tab1:
     with st.container(border=True):
         st.header("Patient")
 
-        age = st.number_input("Age (years)", 18, 100, 65)
+        age = st.slider("Age (years)", 17, 100, 65)
         sex = st.radio("Sex", ["Male", "Female"], horizontal=True)
         weight = st.slider("Weight (kg)", 30.0, 200.0, 75.0, 0.5)
         height = st.slider("Height (cm)", 140.0, 230.0, 175.0, 0.5)
@@ -111,7 +111,7 @@ with tab1:
             "Presumed Muscle Mass", 
             options=list(MUSCLE_FACTORS.keys()), 
             index=1,
-            help="Adjusts presumed creatinine production used to generate kinetic GFR from two creatinine values."
+            help="Adjusts estimated creatinine production used to generate kinetic GFR from two creatinine values."
         )
         selected_factor = MUSCLE_FACTORS[muscle_mass_choice]
 
@@ -131,28 +131,29 @@ with tab1:
         # 2. UI with Sliders for multi-point entry
         st.subheader("Measured PCr")
         for i, entry in enumerate(st.session_state.cr_entries):
-            cols = st.columns([3, 2, 2, 0.6])
+            # 1. PCr Slider on its own row (Full Width)
+            st.markdown(f"**PCr {i+1} (µmol/L)**")
+            entry['val'] = st.slider(
+                "",
+                min_value=35,
+                max_value=500,
+                value=int(entry['val']),
+                step=1,
+                key=f"cr_slider_input_{entry['id']}",
+                label_visibility="collapsed"
+            )
+
+            # 2. Date, Time, and Delete button in columns below the slider
+            cols = st.columns([2, 2, 0.5]) # Adjusted ratios for better spacing
 
             with cols[0]:
-                st.markdown(f"**PCr {i+1} (µmol/L)**")
-                entry['val'] = st.slider(
-                    "",
-                    min_value=35,
-                    max_value=500,
-                    value=int(entry['val']),
-                    step=1,
-                    key=f"cr_slider_input_{entry['id']}",
-                    label_visibility="collapsed"
-                )
-
-            with cols[1]:
                 d = st.date_input(
                     f"Date {i+1}",
                     value=entry['time'].date(),
                     key=f"cr_date_{entry['id']}"
                 )
 
-            with cols[2]:
+            with cols[1]:
                 t = st.time_input(
                     f"Time {i+1}",
                     value=entry['time'].time(),
@@ -160,12 +161,16 @@ with tab1:
                 )
                 entry['time'] = datetime.combine(d, t)
 
-            with cols[3]:
+            with cols[2]:
+                # Only show delete button for entries after the first one
                 if i > 0:
                     st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
                     if st.button("✖", key=f"del_{entry['id']}", help="Remove this measurement"):
                         st.session_state.cr_entries.pop(i)
                         st.rerun()
+            
+            # Add a divider between entries for visual clarity
+            st.divider()
 
         # Updated "add Cr" button with tooltip
         if st.button(
@@ -343,7 +348,6 @@ with tab1:
         patient_info=p_info,
         mode="crcl" 
     )
-
 
 with tab2:
     # ---------------------------
