@@ -19,8 +19,7 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
         fig.add_trace(go.Scatter(
             x=t_dates_kgfr, y=results_kgfr["conc"],
             mode='lines', name='Vanco (Predicted with kGFR)',
-            line=dict(color='rgba(173, 216, 230, 0.6)', width=4), # Pale Blue (LightBlue)
-            hoverinfo='none' # Keep tooltip clean
+            line=dict(color='rgba(173, 216, 230, 0.6)', width=4) # Pale Blue (LightBlue)
         ))
 
     # 2. Confidence Interval (IQR Shadow)

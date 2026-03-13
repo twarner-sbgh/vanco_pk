@@ -361,36 +361,55 @@ with tab2:
     with st.container(border=True):
         st.header("Try Regimen / Suggested Regimen")
 
-        # 1. Get the raw suggestion (Dose and Interval)
-        suggested_dose, suggested_interval, _ = suggest_regimen(pk, target_auc=500, patient_info=p_info)
+        # ---------------------------
+        # Try Regimen UI Toggles
+        # ---------------------------
+        show_try_regimen = st.checkbox("Show try/suggested regimen on graph", value=False)
+        
+        # Only show the kGFR toggle if multiple Cr values exist
+        use_kgfr_suggestion = False
+        if results_kgfr is not None:
+            use_kgfr_suggestion = st.checkbox("Use PK estimated parameters from kGFR", value=False)
+
+        # Determine which PK object and simulation mode to use for the suggestion
+        if use_kgfr_suggestion:
+            # Reconstruct the base Ke from the kGFR active Ke
+            base_ke_kgfr = results_kgfr['ke'] / max(pk.ke_multiplier, 0.01)
+            pk_sugg = VancoPK(base_ke_kgfr, results_kgfr['vd'])
+            pk_sugg.ke_multiplier = pk.ke_multiplier
+            suggestion_mode = "kgfr"
+        else:
+            pk_sugg = pk
+            suggestion_mode = "crcl"
+
+        # 1. Get the raw suggestion (Dose and Interval) based on the chosen PK parameters
+        suggested_dose, suggested_interval, _ = suggest_regimen(pk_sugg, target_auc=500, patient_info=p_info)
 
         # 2. RUN A SIMULATION for that specific suggestion to get the "Summary-style" AUC
-        suggestion_sim = pk.simulate_regimen(
+        suggestion_sim = pk_sugg.simulate_regimen(
             suggested_dose, 
             suggested_interval, 
             sim_start, 
             sim_end, 
             cr_func, 
-            p_info
+            p_info,
+            mode=suggestion_mode
         )
         simulated_suggested_auc = suggestion_sim['auc24']
 
         # 3. Display the label using the simulated value
         st.markdown(f"**Suggested: {suggested_dose} mg q{suggested_interval}h** (Simulated AUC24 ≈ {simulated_suggested_auc:.0f})")
 
-        # ---------------------------
-        # Try Regimen UI
-        # ---------------------------
-        show_try_regimen = st.checkbox("Show try/suggested regimen on graph", value=False)
-
-        # Sync the 'Try' boxes to the suggestion by default
-        try_dose = st.selectbox("Try dose (mg)", [500, 750, 1000, 1250, 1500, 1750, 2000, 2500], 
-                                index=[500,750,1000,1250,1500,1750,2000,2500].index(suggested_dose))
-        try_interval = st.selectbox("Try interval (h)", [6, 8, 12, 18, 24, 36, 48, 72], 
-                                    index=[6,8,12,18,24,36,48,72].index(suggested_interval))
+        # Sync the 'Try' boxes to the suggestion by default (added 250mg to lists to prevent indexing errors)
+        col1, col2 = st.columns(2)
+        try_dose = col1.selectbox("Try dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500], 
+                                index=[250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500].index(suggested_dose))
+        try_interval = col2.selectbox("Try interval (h)", [6, 8, 12, 18, 24, 36, 48, 72], 
+                                    index=[6, 8, 12, 18, 24, 36, 48, 72].index(suggested_interval))
 
         if show_try_regimen:
-            try_results = pk.simulate_regimen(try_dose, try_interval, sim_start, sim_end, cr_func, p_info)
+            # Generate the Try Regimen line using the chosen mode (kGFR vs CrCl)
+            try_results = pk_sugg.simulate_regimen(try_dose, try_interval, sim_start, sim_end, cr_func, p_info, mode=suggestion_mode)
         else:
             try_results = None
 
@@ -489,4 +508,12 @@ with tab2:
             try_results, 
             dose=try_dose, 
             interval=try_interval
+        )
+
+    if results_kgfr is not None:
+        show_metrics(
+            "Summary: Kinetic GFR", 
+            results_kgfr, 
+            dose=ordered_dose if show_ordered_dose else None, 
+            interval=ordered_interval if show_ordered_dose else None
         )
