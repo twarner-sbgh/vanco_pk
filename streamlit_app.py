@@ -363,3 +363,15 @@ with tab2:
 
     if results_kgfr is not None:
         show_metrics("Summary: Kinetic GFR", results_kgfr, dose=ordered_dose if show_ordered_dose else None, interval=ordered_interval if show_ordered_dose else None)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("⬅️ Back to Patient Data & Dosing", use_container_width=True):
+        js_back = '''
+        <script>
+            var tabs = window.parent.document.querySelectorAll('button[data-baseweb="tab"]');
+            if (tabs.length > 0) {
+                tabs[0].click();
+            }
+        </script>
+        '''
+        components.html(js_back, height=0, width=0)
