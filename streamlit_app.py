@@ -1,4 +1,6 @@
 import streamlit as st
+import streamlit.components.v1 as components
+import numpy as np
 from datetime import datetime, timedelta
 from vanco_pk import VancoPK, pk_params_from_patient, calculate_ss_conc
 from creatinine import build_creatinine_function
@@ -25,50 +27,30 @@ st.markdown("""
 with st.expander("⚖️ Legal Disclaimer & Terms of Use"):
     st.caption("""
     By using this application, you acknowledge that:
-    1. This tool is for **educational and informational purposes only**. It is not a substitute for professional clinical judgment, institutional protocols, or the advice of a qualified healthcare provider.
+    1. This tool is for educational and informational purposes only.
     2. This software is provided "as is" without warranties of any kind.
-    3. Final dosing decisions are the sole responsibility of the prescribing clinician. The developer assumes no liability for errors, omissions, or any clinical outcomes resulting from the use of this software.
-    4. Pharmacokinetic models are mathematical approximations and may not account for all patient-specific variables. **Always verify dosing calculations and monitor serum levels according to your local guidelines and directives.**
+    3. Final dosing decisions are the sole responsibility of the prescribing clinician.
+    4. Pharmacokinetic models are mathematical approximations. Always verify dosing calculations.
     """)
 
-# Formatting of tabs to make them larger and more distinct
+# Formatting of tabs
 st.markdown("""
     <style>
-    /* Force tabs to take up equal width (50% each) */
-    div[data-testid="stTabs"] button {
-        flex: 1;
-        width: 100%;
-    }
-
-    /* Style for ALL tabs (Inactive state) */
+    div[data-testid="stTabs"] button { flex: 1; width: 100%; }
     button[data-baseweb="tab"] {
-        font-size: 20px !important;    /* Larger text */
-        font-weight: 800 !important;   /* Extra bold */
-        background-color: #707070 !important; /* Darker medium-grey */
-        color: #FFFFFF !important;     /* White text for contrast */
-        border-radius: 8px 8px 0 0 !important;
-        margin: 4px !important;
+        font-size: 20px !important; font-weight: 800 !important;
+        background-color: #707070 !important; color: #FFFFFF !important;
+        border-radius: 8px 8px 0 0 !important; margin: 4px !important;
         transition: background-color 0.3s ease;
     }
-
-    /* Style for the ACTIVE tab */
     button[aria-selected="true"] {
-        background-color: #e1f5fe !important; /* Soft blue highlight */
-        color: #007bff !important;           /* Bright blue text */
-        border-bottom: 5px solid #007bff !important; /* Thicker accent line */
+        background-color: #e1f5fe !important; color: #007bff !important;
+        border-bottom: 5px solid #007bff !important;
     }
-
-    /* Hover effect for the inactive tabs */
     button[data-baseweb="tab"]:hover {
-        background-color: #505050 !important; /* Even darker on hover */
-        color: #007bff !important;
+        background-color: #505050 !important; color: #007bff !important;
     }
-    
-    /* Ensure the text stays visible and large inside the button container */
-    div[data-testid="stTabs"] p {
-        font-size: 19px !important;
-        font-weight: 800 !important;
-    }
+    div[data-testid="stTabs"] p { font-size: 19px !important; font-weight: 800 !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -78,10 +60,7 @@ with tab1:
     # ---------------------------
     # Simulation settings
     # ---------------------------
-    sim_start_date = st.date_input(
-        "Simulation Start Date",
-        datetime.now().date() - timedelta(days=1)
-    )
+    sim_start_date = st.date_input("Simulation Start Date", datetime.now().date() - timedelta(days=1))
     sim_start = datetime.combine(sim_start_date, datetime.min.time())
 
     # ---------------------------
@@ -89,7 +68,6 @@ with tab1:
     # ---------------------------
     with st.container(border=True):
         st.header("Patient")
-
         age = st.slider("Age (years)", 17, 100, 65)
         sex = st.radio("Sex", ["Male", "Female"], horizontal=True)
         weight = st.slider("Weight (kg)", 30.0, 200.0, 75.0, 0.5)
@@ -100,152 +78,67 @@ with tab1:
     # ---------------------------
     with st.container(border=True):
         st.header("Plasma Creatinine")
-
-        # Muscle Mass Factor - This is a simple categorical choice that adjusts the creatinine production rate in the model.
         MUSCLE_FACTORS = {
             "High (Athletic / High Muscle), 1.25x": 1.25,
             "Average": 1.0,
             "Low (Frail / Elderly / Mildly Cachectic), 0.75x": 0.75,
             "Very Low (Severe Sarcopenia / Paralysis / Bed-Bound), 0.5x": 0.5
         }
-
-        muscle_mass_choice = st.selectbox(
-            "Presumed Muscle Mass", 
-            options=list(MUSCLE_FACTORS.keys()), 
-            index=1,
-            help="Adjusts estimated creatinine production used to generate kinetic GFR from two creatinine values."
-        )
+        muscle_mass_choice = st.selectbox("Presumed Muscle Mass", options=list(MUSCLE_FACTORS.keys()), index=1)
         selected_factor = MUSCLE_FACTORS[muscle_mass_choice]
 
-        # 1. Initialize session state
         if 'cr_entries' not in st.session_state:
-            st.session_state.cr_entries = [{
-                'id': str(uuid.uuid4()),
-                'val': 100,
-                'time': datetime.now() - timedelta(days=1)
-            }]
-        else:
-            # Backfill IDs for old entries
-            for entry in st.session_state.cr_entries:
-                if 'id' not in entry:
-                    entry['id'] = str(uuid.uuid4())
+            st.session_state.cr_entries = [{'id': str(uuid.uuid4()), 'val': 100, 'time': datetime.now() - timedelta(days=1)}]
 
-        # 2. UI with Sliders for multi-point entry
         st.subheader("Measured PCr")
         for i, entry in enumerate(st.session_state.cr_entries):
-            # 1. PCr Slider on its own row (Full Width)
             st.markdown(f"**PCr {i+1} (µmol/L)**")
-            entry['val'] = st.slider(
-                "",
-                min_value=35,
-                max_value=500,
-                value=int(entry['val']),
-                step=1,
-                key=f"cr_slider_input_{entry['id']}",
-                label_visibility="collapsed"
-            )
-
-            # 2. Date, Time, and Delete button in columns below the slider
-            cols = st.columns([2, 2, 0.5]) # Adjusted ratios for better spacing
-
-            with cols[0]:
-                d = st.date_input(
-                    f"Date {i+1}",
-                    value=entry['time'].date(),
-                    key=f"cr_date_{entry['id']}"
-                )
-
-            with cols[1]:
-                t = st.time_input(
-                    f"Time {i+1}",
-                    value=entry['time'].time(),
-                    key=f"cr_time_{entry['id']}"
-                )
+            entry['val'] = st.slider("", 35, 500, int(entry['val']), 1, key=f"cr_slider_input_{entry['id']}", label_visibility="collapsed")
+            cols = st.columns([2, 2, 0.5])
+            with cols[0]: d = st.date_input(f"Date {i+1}", value=entry['time'].date(), key=f"cr_date_{entry['id']}")
+            with cols[1]: 
+                t = st.time_input(f"Time {i+1}", value=entry['time'].time(), key=f"cr_time_{entry['id']}")
                 entry['time'] = datetime.combine(d, t)
-
             with cols[2]:
-                # Only show delete button for entries after the first one
                 if i > 0:
                     st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
                     if st.button("✖", key=f"del_{entry['id']}", help="Remove this measurement"):
                         st.session_state.cr_entries.pop(i)
                         st.rerun()
-            
-            # Add a divider between entries for visual clarity
             st.divider()
 
-        # Updated "add Cr" button with tooltip
-        if st.button(
-            "✚ Add Measured PCr", 
-            key="add_cr_btn", 
-            help="For best results, enter two measurements at least a day apart"
-        ):
+        if st.button("✚ Add Measured PCr", key="add_cr_btn"):
             last_val = st.session_state.cr_entries[-1]['val']
-            st.session_state.cr_entries.append({
-                'id': str(uuid.uuid4()),
-                'val': last_val,
-                'time': datetime.now(),         
-            })
+            st.session_state.cr_entries.append({'id': str(uuid.uuid4()), 'val': last_val, 'time': datetime.now()})
             st.rerun()
 
-        # 3. Final Logic Assembly
         cr_data = [(e['time'], e['val']) for e in st.session_state.cr_entries]
-
-        # --- Core Patient Data ---
-        p_info = {
-            'age': age,
-            'sex': sex,
-            'weight': weight,
-            'height': height,
-            'muscle_factor': selected_factor
-        }
-
-        cr_func = build_creatinine_function(
-            cr_data=cr_data, 
-            future_cr=None, 
-            modified_factor=1.0,
-            patient_params=p_info
-        )
+        p_info = {'age': age, 'sex': sex, 'weight': weight, 'height': height, 'muscle_factor': selected_factor}
+        cr_func = build_creatinine_function(cr_data=cr_data, future_cr=None, modified_factor=1.0, patient_params=p_info)
 
     # ---------------------------
     # Dose List Construction
     # ---------------------------
     with st.container(border=True):
-        manual_dose_inputs = []
-        manual_time_inputs = []
-
         st.header("Individual Vancomycin Doses")
-
-        # Initialize session state if not present
         if 'manual_doses' not in st.session_state:
             st.session_state.manual_doses = [{'id': str(uuid.uuid4())}]
 
         manual_dose_inputs, manual_time_inputs = [], []
-
         for i, entry in enumerate(st.session_state.manual_doses):
-            # Render the checkbox
             is_enabled = st.checkbox(f"Enable individual dose {i+1}", key=f"md_on_{entry['id']}")
-            
             if is_enabled:
                 c1, c2, c3 = st.columns([1, 1, 1])
-                dose = c1.selectbox("Dose (mg)", [500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=2, key=f"md_val_{entry['id']}")
+                dose = c1.selectbox("Dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=3, key=f"md_val_{entry['id']}")
                 d_md = c2.date_input("Date", sim_start.date(), key=f"md_d_{entry['id']}")
                 t_md = c3.time_input("Time", (sim_start + timedelta(hours=9, minutes=30)).time(), key=f"md_t_{entry['id']}")
-                
-                # Collect the data for simulation
                 manual_dose_inputs.append(dose)
                 manual_time_inputs.append(datetime.combine(d_md, t_md))
-
-                # If this is the last entry and it's checked, add a new empty one
                 if i == len(st.session_state.manual_doses) - 1:
                     st.session_state.manual_doses.append({'id': str(uuid.uuid4())})
                     st.rerun()
-                    
             else:
-                # If a checkbox is unchecked AND it's not the only one in the list,
-                # AND there are extra "empty" slots following it, prune the list.
                 if len(st.session_state.manual_doses) > 1 and i < len(st.session_state.manual_doses) - 1:
-                    # Remove all entries after this one to "collapse" the list
                     st.session_state.manual_doses = st.session_state.manual_doses[:i+1]
                     st.rerun()
 
@@ -254,142 +147,113 @@ with tab1:
         ordered_dose, ordered_interval, ordered_start = None, None, None
 
         if show_ordered_dose:
-            ordered_dose = st.selectbox("Ordered dose (mg)", [500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=2)
+            ordered_dose = st.selectbox("Ordered dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500], index=3)
             ordered_interval = st.selectbox("Interval (h)", [6, 8, 12, 18, 24, 36, 48, 72], index=2)
-            
-            # Datetime input
             col1, col2 = st.columns(2)
-            d_ord = col1.date_input(
-                "Ordered Start Date", 
-                (sim_start + timedelta(days=1)).date(),
-            )
-            t_ord = col2.time_input(
-                "Ordered Start Time", 
-                (sim_start + timedelta(hours=9, minutes=30)).time(),
-                help="Doses will be scheduled according to the entered interval starting from this time"
-            )
+            d_ord = col1.date_input("Ordered Start Date", (sim_start + timedelta(days=1)).date())
+            t_ord = col2.time_input("Ordered Start Time", (sim_start + timedelta(hours=9, minutes=30)).time())
             ordered_start = datetime.combine(d_ord, t_ord)
 
+        # Build doses using a 30-day max window so it supports the auto-extend
+        max_sim_end = sim_start + timedelta(days=30)
         doses = build_manual_doses(manual_dose_inputs, manual_time_inputs, sim_start)
         if show_ordered_dose and ordered_dose:
-            # Build ordered doses for the maximum possible window (30 days) 
-            # so they remain available if the simulation auto-extends
-            max_sim_end = sim_start + timedelta(days=30)
             doses += build_ordered_doses(ordered_dose, ordered_interval, ordered_start, sim_start, max_sim_end)
-    
+
     # ---------------------------
     # Measured levels
     # ---------------------------
     with st.container(border=True):
         st.header("Measured Vancomycin Levels")
-
-        # 1. Initialize session state for levels if not present
         if 'level_entries' not in st.session_state:
             st.session_state.level_entries = [{'id': str(uuid.uuid4())}]
 
         levels, level_times = [], []
-
-        # 2. Iterate through the entries in session state
         for i, entry in enumerate(st.session_state.level_entries):
-            # Render the checkbox
             is_enabled = st.checkbox(f"Enable level {i+1}", key=f"lvl_on_{entry['id']}")
-            
             if is_enabled:
                 lvl = st.number_input("Level (mg/L)", 0.0, 100.0, 15.0, step=0.1, key=f"lvl_val_{entry['id']}")
-                
                 col1, col2 = st.columns(2)
                 d_lvl = col1.date_input("Date", sim_start.date(), key=f"lvl_date_{entry['id']}")
                 t_lvl = col2.time_input("Time", (sim_start + timedelta(hours=9)).time(), key=f"lvl_time_{entry['id']}")
-                t = datetime.combine(d_lvl, t_lvl)
-                
-                # Collect data for simulation logic
                 levels.append(lvl)
-                level_times.append(t)
-
-                # EXPANSION: If this is the last entry and it was just checked, add a new empty slot
+                level_times.append(datetime.combine(d_lvl, t_lvl))
                 if i == len(st.session_state.level_entries) - 1:
                     st.session_state.level_entries.append({'id': str(uuid.uuid4())})
                     st.rerun()
-                    
             else:
-                # CONTRACTION: If unchecked and it's not the only box, remove trailing empty boxes
                 if len(st.session_state.level_entries) > 1 and i < len(st.session_state.level_entries) - 1:
                     st.session_state.level_entries = st.session_state.level_entries[:i+1]
                     st.rerun()
 
-    # ---------------------------
-    # Core Simulation Logic & Half-Life Check
-    # ---------------------------
-    # Parameters for PK model are now returned as a dictionary
-    params = pk_params_from_patient(age, sex, weight, height, cr_func, sim_start, muscle_factor=selected_factor)
-    ke_pop = params['ke']
-    vd_pop = params['vd']
+    # --- PROCEED BUTTON (Using JS to switch tabs without breaking CSS) ---
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("Proceed to Results & Simulation ➡️", use_container_width=True, type="primary"):
+        js = '''
+        <script>
+            var tabs = window.parent.document.querySelectorAll('button[data-baseweb="tab"]');
+            if (tabs.length > 1) {
+                tabs[1].click();
+            }
+        </script>
+        '''
+        components.html(js, height=0, width=0)
 
-    # Initialize the PK engine
-    pk = VancoPK(ke_pop, vd_pop)
+# ---------------------------
+# Core Simulation Logic (Runs before Tab 2 UI)
+# ---------------------------
+params = pk_params_from_patient(age, sex, weight, height, cr_func, sim_start, muscle_factor=selected_factor)
+pk = VancoPK(params['ke'], params['vd'])
 
-    # 1. Fit the model to get the accurate ke_multiplier
-    if len(levels) >= 1:
-        pk.fit_ke_from_levels(doses, level_times, levels, sim_start, cr_func=cr_func, patient_info=p_info, mode="crcl")
-        fit_status_msg = f"Model fitted to {len(levels)} level(s)."
-        is_fitted = True
-    else:
-        fit_status_msg = "Using population PK estimates (no levels entered)."
-        is_fitted = False
+if len(levels) >= 1:
+    pk.fit_ke_from_levels(doses, level_times, levels, sim_start, cr_func=cr_func, patient_info=p_info, mode="crcl")
+    fit_status_msg = f"Model fitted to {len(levels)} level(s)."
+    is_fitted = True
+else:
+    fit_status_msg = "Using population PK estimates (no levels entered)."
+    is_fitted = False
 
-    # 2. Calculate Half-Lives to Determine Required Window
-    import numpy as np
-    
-    effective_ke_crcl = pk.ke * pk.ke_multiplier
-    hl_crcl = (np.log(2) / effective_ke_crcl) if effective_ke_crcl > 0 else 24
-    
-    hl_kgfr = 0
-    if len(st.session_state.cr_entries) >= 2:
-        # Approximate kGFR half-life using the latest creatinine entry's kGFR value
-        last_cr_time = st.session_state.cr_entries[-1]['time']
-        _, latest_kgfr = cr_func(last_cr_time)
-        if latest_kgfr is not None:
-            vd_safe = pk.vd if (pk.vd and pk.vd > 0) else 50.0
-            effective_ke_kgfr = ((latest_kgfr * 0.06) / vd_safe) * pk.ke_multiplier
-            hl_kgfr = (np.log(2) / effective_ke_kgfr) if effective_ke_kgfr > 0 else 24
+# Calculate max half-life for auto-duration calculation
+effective_ke_crcl = pk.ke * pk.ke_multiplier
+hl_crcl = (np.log(2) / effective_ke_crcl) if effective_ke_crcl > 0 else 24
 
-    max_hl = max(hl_crcl, hl_kgfr)
-    auto_duration_days = int(np.ceil((4 * max_hl) / 24.0))
-    auto_duration_days = max(7, min(auto_duration_days, 30)) # Set minimum 7 days, maximum 30 days
+hl_kgfr = 0
+if len(st.session_state.cr_entries) >= 2:
+    last_cr_time = st.session_state.cr_entries[-1]['time']
+    _, latest_kgfr = cr_func(last_cr_time)
+    if latest_kgfr is not None:
+        vd_safe = pk.vd if (pk.vd and pk.vd > 0) else 50.0
+        effective_ke_kgfr = ((latest_kgfr * 0.06) / vd_safe) * pk.ke_multiplier
+        hl_kgfr = (np.log(2) / effective_ke_kgfr) if effective_ke_kgfr > 0 else 24
 
+max_hl = max(hl_crcl, hl_kgfr)
+auto_duration_days = int(np.ceil((5 * max_hl) / 24.0))
+auto_duration_days = max(7, min(auto_duration_days, 30)) # Restrict between 7 and 30 days
+
+# ---------------------------
+# Results Tab
+# ---------------------------
 with tab2:
-    # ---------------------------
-    # Duration Slider & Final PK Runs
-    # ---------------------------
-    st.header("Simulation Settings")
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        duration_days = st.slider(
-            "Simulation Duration (Days)", 
-            min_value=1, max_value=30, 
-            value=auto_duration_days,
-            help="Defaults to capturing at least 5 half-lives to show steady state (max 30 days)."
-        )
-    with col2:
-        st.markdown("<div style='height:36px'></div>", unsafe_allow_html=True) # Vertical alignment
-        if auto_duration_days > 7 and duration_days == auto_duration_days:
-            st.info(f"(auto-extended to **{auto_duration_days} days**)")
+    # Full-width slider
+    duration_days = st.slider(
+        "Simulation Duration (Days)", 
+        min_value=1, max_value=30, 
+        value=auto_duration_days,
+        help="Defaults to capturing at least 5 half-lives to show steady state (max 30 days)."
+    )
+    
+    # Notification appearing below the slider
+    if auto_duration_days > 7 and duration_days == auto_duration_days:
+        st.info(f"⏳ Auto-extended to **{auto_duration_days} days** (5 × t½ of ~{max_hl:.1f}h).")
 
     sim_end = sim_start + timedelta(days=duration_days)
 
-    # Run the simulations with the final duration_days
+    # 3. Final Simulation Runs
     results_kgfr = None
     if len(st.session_state.cr_entries) >= 2:
         results_kgfr = pk.run(doses=doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info, mode="kgfr")
 
-    results = pk.run(
-        doses=doses,
-        duration_days=duration_days,
-        sim_start=sim_start,
-        cr_func=cr_func,
-        patient_info=p_info,
-        mode="crcl" 
-    )
+    results = pk.run(doses=doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info, mode="crcl")
 
     # ---------------------------
     # Suggestion & Alignment
@@ -397,19 +261,13 @@ with tab2:
     with st.container(border=True):
         st.header("Try Regimen / Suggested Regimen")
 
-        # ---------------------------
-        # Try Regimen UI Toggles
-        # ---------------------------
         show_try_regimen = st.checkbox("Show try/suggested regimen on graph", value=False)
         
-        # Only show the kGFR toggle if multiple Cr values exist
         use_kgfr_suggestion = False
         if results_kgfr is not None:
             use_kgfr_suggestion = st.checkbox("Use PK estimated parameters from kGFR", value=False)
 
-        # Determine which PK object and simulation mode to use for the suggestion
         if use_kgfr_suggestion:
-            # Reconstruct the base Ke from the kGFR active Ke
             base_ke_kgfr = results_kgfr['ke'] / max(pk.ke_multiplier, 0.01)
             pk_sugg = VancoPK(base_ke_kgfr, results_kgfr['vd'])
             pk_sugg.ke_multiplier = pk.ke_multiplier
@@ -418,25 +276,15 @@ with tab2:
             pk_sugg = pk
             suggestion_mode = "crcl"
 
-        # 1. Get the raw suggestion (Dose and Interval) based on the chosen PK parameters
         suggested_dose, suggested_interval, _ = suggest_regimen(pk_sugg, target_auc=500, patient_info=p_info)
-
-        # 2. RUN A SIMULATION for that specific suggestion to get the "Summary-style" AUC
+        
         suggestion_sim = pk_sugg.simulate_regimen(
-            suggested_dose, 
-            suggested_interval, 
-            sim_start, 
-            sim_end, 
-            cr_func, 
-            p_info,
-            mode=suggestion_mode
+            suggested_dose, suggested_interval, sim_start, sim_end, cr_func, p_info, mode=suggestion_mode
         )
         simulated_suggested_auc = suggestion_sim['auc24']
 
-        # 3. Display the label using the simulated value
         st.markdown(f"**Suggested: {suggested_dose} mg q{suggested_interval}h** (Simulated AUC24 ≈ {simulated_suggested_auc:.0f})")
 
-        # Sync the 'Try' boxes to the suggestion by default (added 250mg to lists to prevent indexing errors)
         col1, col2 = st.columns(2)
         try_dose = col1.selectbox("Try dose (mg)", [250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500], 
                                 index=[250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500].index(suggested_dose))
@@ -444,63 +292,41 @@ with tab2:
                                     index=[6, 8, 12, 18, 24, 36, 48, 72].index(suggested_interval))
 
         if show_try_regimen:
-            # Generate the Try Regimen line using the chosen mode (kGFR vs CrCl)
             try_results = pk_sugg.simulate_regimen(try_dose, try_interval, sim_start, sim_end, cr_func, p_info, mode=suggestion_mode)
         else:
             try_results = None
 
     # ---------------------------
-    # Plotting (Dual Axis)
+    # Plotting
     # ---------------------------
     ci_bounds = None
-
     if len(levels) >= 1:
         mult_lo, mult_hi = pk.compute_ci(level=0.5)
         current_fitted_mult = pk.ke_multiplier
-        
         pk.ke_multiplier = mult_hi 
         res_hi = pk.run(doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info, mode="crcl")
-        
         pk.ke_multiplier = mult_lo
         res_lo = pk.run(doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info, mode="crcl")
-        
         pk.ke_multiplier = current_fitted_mult
         ci_bounds = (res_lo, res_hi)
 
-    # --- Calculate Static CrCl for inclusion on the Y2 Axis ---
     if st.session_state.cr_entries:
         last_entry = st.session_state.cr_entries[-1]
-        static_params = pk_params_from_patient(
-            age=age, sex=sex, weight=weight, height=height, 
-            cr_func=cr_func, when=last_entry['time'], muscle_factor=selected_factor
-        )
+        static_params = pk_params_from_patient(age, sex, weight, height, cr_func, when=last_entry['time'], muscle_factor=selected_factor)
         current_static_crcl = static_params['crcl']
     else:
         current_static_crcl = None
 
-    # Pass everything to the chart
-    fig = plot_vanco_simulation(
-        sim_start, 
-        results, 
-        cr_func, 
-        levels, 
-        level_times, 
-        try_results, 
-        ci_bounds, 
-        static_crcl=current_static_crcl, 
-        results_kgfr=results_kgfr  
-    )
-
+    fig = plot_vanco_simulation(sim_start, results, cr_func, levels, level_times, try_results, ci_bounds, static_crcl=current_static_crcl, results_kgfr=results_kgfr)
     st.plotly_chart(fig, use_container_width=True)
 
-    # Disclaimer re pop PK vs fitted model after the plot
     if is_fitted:
         st.info(fit_status_msg)
     else:
         st.warning(fit_status_msg)
 
     # ---------------------------
-    # Metrics with Color-Coding
+    # Metrics
     # ---------------------------
     def show_metrics(label, res, dose=None, interval=None):
         if dose and interval:
@@ -522,7 +348,6 @@ with tab2:
             cols[4].metric("Cpkss", "N/A")
             cols[5].metric("Ctrss", "N/A")
 
-        # Color coding logic for AUC24
         auc = res['auc24']
         if 400 <= auc <= 600:
             st.success(f"AUC24 of {auc:.0f} is within target range (400-600).")
@@ -531,25 +356,10 @@ with tab2:
         else:
             st.error(f"AUC24 of {auc:.0f} is above target range (> 600).")
 
-    show_metrics(
-        "Summary: Ordered Regimen", 
-        results, 
-        dose=ordered_dose if show_ordered_dose else None, 
-        interval=ordered_interval if show_ordered_dose else None
-    )
+    show_metrics("Summary: Ordered Regimen", results, dose=ordered_dose if show_ordered_dose else None, interval=ordered_interval if show_ordered_dose else None)
 
     if try_results:
-        show_metrics(
-            "Summary: Try Regimen", 
-            try_results, 
-            dose=try_dose, 
-            interval=try_interval
-        )
+        show_metrics("Summary: Try Regimen", try_results, dose=try_dose, interval=try_interval)
 
     if results_kgfr is not None:
-        show_metrics(
-            "Summary: Kinetic GFR", 
-            results_kgfr, 
-            dose=ordered_dose if show_ordered_dose else None, 
-            interval=ordered_interval if show_ordered_dose else None
-        )
+        show_metrics("Summary: Kinetic GFR", results_kgfr, dose=ordered_dose if show_ordered_dose else None, interval=ordered_interval if show_ordered_dose else None)
