@@ -79,12 +79,15 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
     # 6. Static Estimated CrCl 
     if static_crcl is not None:
         fig.add_trace(go.Scatter(
-            x=[t_dates_main[0], t_dates_main[-1]],
-            y=[static_crcl, static_crcl],
+            # FIX: Use the full time array so points exist for the hover tool
+            x=t_dates_main,
+            y=[static_crcl] * len(t_dates_main), 
             name=f"Est CrCl (CG): {static_crcl:.0f} mL/min",
             mode="lines",  
             line=dict(color='indigo', width=1, dash='dash'),
-            yaxis="y2"
+            yaxis="y2",
+            # Use hovertemplate for cleaner output in unified mode
+            hovertemplate='%{y:.1f} mL/min<extra></extra>',
         ))
 
     # 7. Kinetic GFR Line 
@@ -96,7 +99,9 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             y=kgfr_vals, 
             name=f"Kinetic GFR: {latest_kgfr:.0f} mL/min", 
             line=dict(color="darkorchid", width=2, dash="dot"), 
-            yaxis="y2"
+            yaxis="y2",
+            # Recommended: Add hovertemplate so it matches the CrCl style
+            hovertemplate='%{y:.1f} mL/min<extra></extra>'
         ))
 
     # --- STYLE & LEGEND ---
@@ -131,27 +136,31 @@ def plot_vanco_simulation(sim_start, results, cr_func, levels=None, level_times=
             rangemode='tozero'         
         ),
         yaxis2=dict(
-            title=dict(text="Estimated CrCl / Kinetic GFR (mL/min)", font=dict(color="indigo")),
-            tickfont=dict(color="indigo"),
+            showticklabels=False,   # Removes the numbers on the right
+            title=None,             # Removes the side title
             overlaying="y",
             side="right",
-            showline=True, 
-            linecolor='black',
-            showgrid=False,            
-            rangemode='tozero'         
+            showline=False,
+            showgrid=False,
+            zeroline=False,
+            rangemode='tozero',
+            fixedrange=True,        # Prevents accidental zooming on the hidden axis
+            matches=None            # Ensure it scales independently
         ),
+        hovermode="x unified",  
+                
         legend=dict(
-            orientation="v", 
-            yanchor="top",
-            y=0.99, 
-            xanchor="left",
-            x=0.01,
-            font=dict(color="black", size=11),
-            bgcolor="rgba(255, 255, 255, 0.7)", 
-            bordercolor="black",
-            borderwidth=1
-        ),
+                orientation="v", 
+                yanchor="top",
+                y=0.99, 
+                xanchor="left",
+                x=0.01,
+                font=dict(color="black", size=11),
+                bgcolor="rgba(255, 255, 255, 0.7)", 
+                bordercolor="black",
+                borderwidth=1
+            ),
         margin=dict(l=40, r=40, t=40, b=40) 
-    )
+        )
     
     return fig
