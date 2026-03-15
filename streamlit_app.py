@@ -84,9 +84,6 @@ with tab1:
     )
     sim_start = datetime.combine(sim_start_date, datetime.min.time())
 
-    duration_days = st.slider("Simulation Duration (Days)", 1, 14, 7)
-    sim_end = sim_start + timedelta(days=duration_days)
-
     # ---------------------------
     # Patient inputs
     # ---------------------------
@@ -275,8 +272,11 @@ with tab1:
 
         doses = build_manual_doses(manual_dose_inputs, manual_time_inputs, sim_start)
         if show_ordered_dose and ordered_dose:
-            doses += build_ordered_doses(ordered_dose, ordered_interval, ordered_start, sim_start, sim_end)
-
+            # Build ordered doses for the maximum possible window (30 days) 
+            # so they remain available if the simulation auto-extends
+            max_sim_end = sim_start + timedelta(days=30)
+            doses += build_ordered_doses(ordered_dose, ordered_interval, ordered_start, sim_start, max_sim_end)
+    
     # ---------------------------
     # Measured levels
     # ---------------------------
@@ -318,7 +318,7 @@ with tab1:
                     st.rerun()
 
     # ---------------------------
-    # Core Simulation Logic
+    # Core Simulation Logic & Half-Life Check
     # ---------------------------
     # Parameters for PK model are now returned as a dictionary
     params = pk_params_from_patient(age, sex, weight, height, cr_func, sim_start, muscle_factor=selected_factor)
@@ -328,23 +328,60 @@ with tab1:
     # Initialize the PK engine
     pk = VancoPK(ke_pop, vd_pop)
 
-    # 1. Primary Simulation (The Blue Plot - CrCl based)
+    # 1. Fit the model to get the accurate ke_multiplier
     if len(levels) >= 1:
         pk.fit_ke_from_levels(doses, level_times, levels, sim_start, cr_func=cr_func, patient_info=p_info, mode="crcl")
-        # Store message for later display
         fit_status_msg = f"Model fitted to {len(levels)} level(s)."
         is_fitted = True
     else:
-        # Store message for later display
         fit_status_msg = "Using population PK estimates (no levels entered)."
         is_fitted = False
 
-    # 2. Kinetic Simulation (The Shadow - kGFR based)
+    # 2. Calculate Half-Lives to Determine Required Window
+    import numpy as np
+    
+    effective_ke_crcl = pk.ke * pk.ke_multiplier
+    hl_crcl = (np.log(2) / effective_ke_crcl) if effective_ke_crcl > 0 else 24
+    
+    hl_kgfr = 0
+    if len(st.session_state.cr_entries) >= 2:
+        # Approximate kGFR half-life using the latest creatinine entry's kGFR value
+        last_cr_time = st.session_state.cr_entries[-1]['time']
+        _, latest_kgfr = cr_func(last_cr_time)
+        if latest_kgfr is not None:
+            vd_safe = pk.vd if (pk.vd and pk.vd > 0) else 50.0
+            effective_ke_kgfr = ((latest_kgfr * 0.06) / vd_safe) * pk.ke_multiplier
+            hl_kgfr = (np.log(2) / effective_ke_kgfr) if effective_ke_kgfr > 0 else 24
+
+    max_hl = max(hl_crcl, hl_kgfr)
+    auto_duration_days = int(np.ceil((4 * max_hl) / 24.0))
+    auto_duration_days = max(7, min(auto_duration_days, 30)) # Set minimum 7 days, maximum 30 days
+
+with tab2:
+    # ---------------------------
+    # Duration Slider & Final PK Runs
+    # ---------------------------
+    st.header("Simulation Settings")
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        duration_days = st.slider(
+            "Simulation Duration (Days)", 
+            min_value=1, max_value=30, 
+            value=auto_duration_days,
+            help="Defaults to capturing at least 5 half-lives to show steady state (max 30 days)."
+        )
+    with col2:
+        st.markdown("<div style='height:36px'></div>", unsafe_allow_html=True) # Vertical alignment
+        if auto_duration_days > 7 and duration_days == auto_duration_days:
+            st.info(f"(auto-extended to **{auto_duration_days} days**)")
+
+    sim_end = sim_start + timedelta(days=duration_days)
+
+    # Run the simulations with the final duration_days
     results_kgfr = None
     if len(st.session_state.cr_entries) >= 2:
         results_kgfr = pk.run(doses=doses, duration_days=duration_days, sim_start=sim_start, cr_func=cr_func, patient_info=p_info, mode="kgfr")
 
-    # 3. Standard Simulation (The Results - CrCl based)
     results = pk.run(
         doses=doses,
         duration_days=duration_days,
@@ -354,7 +391,6 @@ with tab1:
         mode="crcl" 
     )
 
-with tab2:
     # ---------------------------
     # Suggestion & Alignment
     # ---------------------------
