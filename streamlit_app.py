@@ -60,7 +60,10 @@ with tab1:
     # ---------------------------
     # Simulation settings
     # ---------------------------
-    sim_start_date = st.date_input("Simulation Start Date", datetime.now().date() - timedelta(days=1))
+    if 'sim_start_date' not in st.session_state:
+        st.session_state.sim_start_date = datetime.now().date() - timedelta(days=1)
+        
+    sim_start_date = st.date_input("Simulation Start Date", value=st.session_state.sim_start_date)
     sim_start = datetime.combine(sim_start_date, datetime.min.time())
 
     # ---------------------------
@@ -185,6 +188,29 @@ with tab1:
                 if len(st.session_state.level_entries) > 1 and i < len(st.session_state.level_entries) - 1:
                     st.session_state.level_entries = st.session_state.level_entries[:i+1]
                     st.rerun()
+
+    # --- AUTO-REWIND SIMULATION START DATE ---
+    # Collect all entered dates to find the earliest one
+    all_dates = []
+    
+    # 1. Manual Doses
+    for dt in manual_time_inputs:
+        all_dates.append(dt.date())
+        
+    # 2. Ordered Regimen
+    if show_ordered_dose and ordered_start:
+        all_dates.append(ordered_start.date())
+        
+    # 3. Measured Levels
+    for dt in level_times:
+        all_dates.append(dt.date())
+
+    if all_dates:
+        earliest_date = min(all_dates)
+        if earliest_date < sim_start_date:
+            st.session_state.sim_start_date = earliest_date
+            st.warning(f"⚠️ **Simulation Start Date auto-adjusted** to {earliest_date.strftime('%b %d, %Y')} to accommodate earlier input.")
+            st.rerun()
 
     # --- PROCEED BUTTON (Using JS to switch tabs without breaking CSS) ---
     st.markdown("<br>", unsafe_allow_html=True)
