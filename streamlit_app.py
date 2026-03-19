@@ -107,7 +107,7 @@ with tab1:
                         st.rerun()
             st.divider()
 
-        if st.button("✚ Add Measured PCr", key="add_cr_btn"):
+        if st.button("✚ Add Measured PCr", key="add_cr_btn", help="Allows for estimation of kinetic GFR with changing renal function. For best results, add one additional PCr measurement at least 24 hours after the first"):
             last_val = st.session_state.cr_entries[-1]['val']
             st.session_state.cr_entries.append({'id': str(uuid.uuid4()), 'val': last_val, 'time': datetime.now()})
             st.rerun()
@@ -265,7 +265,7 @@ with tab2:
         
         use_kgfr_suggestion = False
         if results_kgfr is not None:
-            use_kgfr_suggestion = st.checkbox("Use PK estimated parameters from kGFR", value=False)
+            use_kgfr_suggestion = st.checkbox("Use estimated PK parameters from kGFR", value=False)
 
         if use_kgfr_suggestion:
             base_ke_kgfr = results_kgfr['ke'] / max(pk.ke_multiplier, 0.01)
@@ -355,14 +355,17 @@ with tab2:
             st.error(f"AUC24 of {auc:.0f} is below target range (< 400).")
         else:
             st.error(f"AUC24 of {auc:.0f} is above target range (> 600).")
-
-    show_metrics("Summary: Ordered Regimen", results, dose=ordered_dose if show_ordered_dose else None, interval=ordered_interval if show_ordered_dose else None)
+    
+    with st.container(border=True):
+        show_metrics("Summary: Ordered Regimen", results, dose=ordered_dose if show_ordered_dose else None, interval=ordered_interval if show_ordered_dose else None)
 
     if try_results:
-        show_metrics("Summary: Try Regimen", try_results, dose=try_dose, interval=try_interval)
+        with st.container(border=True):
+            show_metrics("Summary: Try Regimen", try_results, dose=try_dose, interval=try_interval)
 
     if results_kgfr is not None:
-        show_metrics("Summary: Kinetic GFR", results_kgfr, dose=ordered_dose if show_ordered_dose else None, interval=ordered_interval if show_ordered_dose else None)
+        with st.container(border=True):
+            show_metrics("Summary: Kinetic GFR", results_kgfr, dose=ordered_dose if show_ordered_dose else None, interval=ordered_interval if show_ordered_dose else None)
     
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("⬅️ Back to Patient Data & Dosing", use_container_width=True):
