@@ -25,7 +25,6 @@ import streamlit as st
 from vanco_pk import VancoPK, pk_params_from_patient, calculate_ss_conc
 from creatinine import build_creatinine_function
 from dosing import build_manual_doses, build_ordered_doses, suggest_regimen
-from dosing import build_manual_doses, build_ordered_doses, suggest_regimen
 from plotting import plot_vanco_simulation
 
 # ---------------------------------------------------------------------------
@@ -196,8 +195,6 @@ def render_input_view():
 
     # --- Patient ----------------------------------------------------------
     pt = ss.patient
-    # --- Patient ----------------------------------------------------------
-    pt = ss.patient
     with st.container(border=True):
         st.header("Patient")
         _seed("w_age", pt["age"])
@@ -209,7 +206,6 @@ def render_input_view():
         _seed("w_height", float(pt["height"]))
         pt["height"] = st.slider("Height (cm)", 140.0, 230.0, step=0.5, key="w_height")
 
-    # --- Plasma creatinine ------------------------------------------------
     # --- Plasma creatinine ------------------------------------------------
     with st.container(border=True):
         st.header("Plasma Creatinine")
@@ -242,14 +238,8 @@ def render_input_view():
                           "For best results add a second PCr at least 24 h after the first."):
             ss.cr_entries.append({"id": str(uuid.uuid4()),
                                   "val": ss.cr_entries[-1]["val"], "time": datetime.now()})
-        if st.button("✚ Add Measured PCr", key="cr_add",
-                     help="Enables kinetic GFR estimation with changing renal function. "
-                          "For best results add a second PCr at least 24 h after the first."):
-            ss.cr_entries.append({"id": str(uuid.uuid4()),
-                                  "val": ss.cr_entries[-1]["val"], "time": datetime.now()})
             st.rerun()
 
-    # --- Individual doses -------------------------------------------------
     # --- Individual doses -------------------------------------------------
     with st.container(border=True):
         st.header("Individual Vancomycin Doses")
@@ -282,8 +272,6 @@ def render_input_view():
 
     # --- Ordered regimen --------------------------------------------------
     with st.container(border=True):
-    # --- Ordered regimen --------------------------------------------------
-    with st.container(border=True):
         st.header("Ordered Vancomycin Regimen")
         od = ss.ordered
         _seed("w_od_show", od["show"])
@@ -302,7 +290,6 @@ def render_input_view():
             t = c2.time_input("Ordered Start Time", key="w_od_t")
             od["start"] = datetime.combine(d, t)
 
-    # --- Measured levels --------------------------------------------------
     # --- Measured levels --------------------------------------------------
     with st.container(border=True):
         st.header("Measured Vancomycin Levels")
@@ -333,11 +320,6 @@ def render_input_view():
     all_dates += [e["time"].date() for e in ss.level_entries]
     if ss.ordered["show"] and ss.ordered["start"]:
         all_dates.append(ss.ordered["start"].date())
-    # --- Auto-rewind sim start date to the earliest entered date ----------
-    all_dates = [e["time"].date() for e in ss.dose_entries]
-    all_dates += [e["time"].date() for e in ss.level_entries]
-    if ss.ordered["show"] and ss.ordered["start"]:
-        all_dates.append(ss.ordered["start"].date())
     if all_dates:
         earliest = min(all_dates)
         if earliest < sim_start_date:
@@ -349,7 +331,6 @@ def render_input_view():
                             f"{earliest.strftime('%b %d, %Y')} to accommodate earlier input.")
             st.rerun()
 
-    # --- Proceed ----------------------------------------------------------
     # --- Proceed ----------------------------------------------------------
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("Proceed to Results & Simulation ➡️", width="stretch", type="primary"):
@@ -415,35 +396,11 @@ def render_results_view():
     max_hl = max(hl_crcl, hl_kgfr)
     auto_duration = int(np.ceil((5 * max_hl) / 24.0))
     auto_duration = max(7, min(auto_duration, 30))
-    if levels:
-        pk.fit_ke_from_levels(doses, level_times, levels, sim_start,
-                              cr_func=cr_func, patient_info=p_info, mode="crcl")
-        is_fitted, fit_msg = True, f"Model fitted to {len(levels)} level(s)."
-    else:
-        is_fitted, fit_msg = False, "Using population PK estimates (no levels entered)."
-
-    # --- Auto simulation duration (>= 5 half-lives, clamped 7-30 d) -------
-    eff_ke_crcl = pk.ke * pk.ke_multiplier
-    hl_crcl = (np.log(2) / eff_ke_crcl) if eff_ke_crcl > 0 else 24
-    hl_kgfr = 0
-    if len(cr_data) >= 2:
-        _, latest_kgfr = cr_func(cr_data[-1][0])
-        if latest_kgfr is not None:
-            vd_safe = pk.vd if (pk.vd and pk.vd > 0) else 50.0
-            eff_ke_kgfr = ((latest_kgfr * 0.06) / vd_safe) * pk.ke_multiplier
-            hl_kgfr = (np.log(2) / eff_ke_kgfr) if eff_ke_kgfr > 0 else 24
-    max_hl = max(hl_crcl, hl_kgfr)
-    auto_duration = int(np.ceil((5 * max_hl) / 24.0))
-    auto_duration = max(7, min(auto_duration, 30))
 
     duration_days = st.slider(
         "Simulation Duration (Days)", 1, 30, auto_duration,
         help="Defaults to capturing at least 5 half-lives to show steady state (max 30 days).",
-        "Simulation Duration (Days)", 1, 30, auto_duration,
-        help="Defaults to capturing at least 5 half-lives to show steady state (max 30 days).",
     )
-    if auto_duration > 7 and duration_days == auto_duration:
-        st.info(f"⏳ Auto-extended to **{auto_duration} days** (5 × t½ of ~{max_hl:.1f}h).")
     if auto_duration > 7 and duration_days == auto_duration:
         st.info(f"⏳ Auto-extended to **{auto_duration} days** (5 × t½ of ~{max_hl:.1f}h).")
 
@@ -475,25 +432,16 @@ def render_results_view():
         show_try = st.checkbox("Show try/suggested regimen on graph", value=False)
 
         use_kgfr = False
-        show_try = st.checkbox("Show try/suggested regimen on graph", value=False)
-
-        use_kgfr = False
         if results_kgfr is not None:
             use_kgfr = st.checkbox("Use estimated PK parameters from kGFR", value=False)
-            use_kgfr = st.checkbox("Use estimated PK parameters from kGFR", value=False)
 
-        if use_kgfr:
-            base_ke_kgfr = results_kgfr["ke"] / max(pk.ke_multiplier, 0.01)
-            pk_sugg = VancoPK(base_ke_kgfr, results_kgfr["vd"])
         if use_kgfr:
             base_ke_kgfr = results_kgfr["ke"] / max(pk.ke_multiplier, 0.01)
             pk_sugg = VancoPK(base_ke_kgfr, results_kgfr["vd"])
             pk_sugg.ke_multiplier = pk.ke_multiplier
             sugg_mode = "kgfr"
-            sugg_mode = "kgfr"
         else:
             pk_sugg = pk
-            sugg_mode = "crcl"
             sugg_mode = "crcl"
 
         sugg_dose, sugg_interval, _ = suggest_regimen(pk_sugg, target_auc=AUC_TARGET,
@@ -580,20 +528,12 @@ def render_results_view():
     # --- Confidence interval (from fitted multiplier SD) ------------------
     ci_bounds = None
     if levels:
-    if levels:
         mult_lo, mult_hi = pk.compute_ci(level=0.5)
         fitted_mult = pk.ke_multiplier
         pk.ke_multiplier = mult_hi
         res_hi = pk.run(doses, duration_days=duration_days, sim_start=sim_start,
                         cr_func=cr_func, patient_info=p_info, mode="crcl")
-        fitted_mult = pk.ke_multiplier
-        pk.ke_multiplier = mult_hi
-        res_hi = pk.run(doses, duration_days=duration_days, sim_start=sim_start,
-                        cr_func=cr_func, patient_info=p_info, mode="crcl")
         pk.ke_multiplier = mult_lo
-        res_lo = pk.run(doses, duration_days=duration_days, sim_start=sim_start,
-                        cr_func=cr_func, patient_info=p_info, mode="crcl")
-        pk.ke_multiplier = fitted_mult
         res_lo = pk.run(doses, duration_days=duration_days, sim_start=sim_start,
                         cr_func=cr_func, patient_info=p_info, mode="crcl")
         pk.ke_multiplier = fitted_mult
@@ -611,27 +551,11 @@ def render_results_view():
                                 try_results, ci_bounds, static_crcl=static_crcl,
                                 results_kgfr=results_kgfr)
     st.plotly_chart(fig, width="stretch")
-    # --- Static Cockcroft-Gault CrCl for plot overlay ---------------------
-    static_crcl = None
-    if cr_data:
-        static_crcl = pk_params_from_patient(
-            pt["age"], pt["sex"], pt["weight"], pt["height"],
-            cr_func, when=cr_data[-1][0], muscle_factor=muscle_factor)["crcl"]
-
-    # --- Plot -------------------------------------------------------------
-    fig = plot_vanco_simulation(sim_start, results, cr_func, levels, level_times,
-                                try_results, ci_bounds, static_crcl=static_crcl,
-                                results_kgfr=results_kgfr)
-    st.plotly_chart(fig, width="stretch")
 
     (st.info if is_fitted else st.warning)(fit_msg)
-    (st.info if is_fitted else st.warning)(fit_msg)
 
-    # --- Metrics ----------------------------------------------------------
     # --- Metrics ----------------------------------------------------------
     def show_metrics(label, res, dose=None, interval=None):
-        st.subheader(f"{label} ({dose:.0f} mg q{interval:.0f}h)" if dose and interval else label)
-        cols = st.columns(6)
         st.subheader(f"{label} ({dose:.0f} mg q{interval:.0f}h)" if dose and interval else label)
         cols = st.columns(6)
         cols[0].metric("ke (1/h)", f"{res['ke']:.3f}")
@@ -641,7 +565,6 @@ def render_results_view():
                        help="Average 24-h AUC at the end of the simulation, taken over whole "
                             "dosing intervals when the regimen's interval is known.")
         if dose and interval:
-            cpk, ctr = calculate_ss_conc(res["ke"], res["vd"], dose, interval)
             cpk, ctr = calculate_ss_conc(res["ke"], res["vd"], dose, interval)
             cols[4].metric("Cpkss (mg/L)", f"{cpk:.1f}")
             cols[5].metric("Ctrss (mg/L)", f"{ctr:.1f}")
@@ -654,24 +577,13 @@ def render_results_view():
             st.success(f"AUC24 of {auc:.0f} is within target range ({AUC_LOW}-{AUC_HIGH}).")
         elif auc < AUC_LOW:
             st.error(f"AUC24 of {auc:.0f} is below target range (< {AUC_LOW}).")
-        auc = res["auc24"]
-        if AUC_LOW <= auc <= AUC_HIGH:
-            st.success(f"AUC24 of {auc:.0f} is within target range ({AUC_LOW}-{AUC_HIGH}).")
-        elif auc < AUC_LOW:
-            st.error(f"AUC24 of {auc:.0f} is below target range (< {AUC_LOW}).")
         else:
             st.error(f"AUC24 of {auc:.0f} is above target range (> {AUC_HIGH}).")
 
     od_dose = od["dose"] if od["show"] else None
     od_interval = od["interval"] if od["show"] else None
 
-            st.error(f"AUC24 of {auc:.0f} is above target range (> {AUC_HIGH}).")
-
-    od_dose = od["dose"] if od["show"] else None
-    od_interval = od["interval"] if od["show"] else None
-
     with st.container(border=True):
-        show_metrics("Summary: Ordered Regimen", results, dose=od_dose, interval=od_interval)
         show_metrics("Summary: Ordered Regimen", results, dose=od_dose, interval=od_interval)
     if try_results:
         with st.container(border=True):
@@ -682,22 +594,7 @@ def render_results_view():
         with st.container(border=True):
             show_metrics("Summary: Kinetic GFR", results_kgfr, dose=od_dose, interval=od_interval)
 
-            show_metrics("Summary: Kinetic GFR", results_kgfr, dose=od_dose, interval=od_interval)
-
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("⬅️ Back to Patient Data & Dosing", width="stretch", key="back_bottom"):
-        go_to("input")
-
-
-# ===========================================================================
-# ROUTER
-# ===========================================================================
-_normalize_entries()
-if ss.view == "results":
-    render_results_view()
-else:
-    render_input_view()
-
     if st.button("⬅️ Back to Patient Data & Dosing", width="stretch", key="back_bottom"):
         go_to("input")
 
